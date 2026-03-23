@@ -62,11 +62,11 @@ export class AuthService {
     });
 
     if (existingUser?.phone === phone) {
-      throw new ConflictException('此手機號碼已註冊。');
+      throw new ConflictException('Phone number is already registered.');
     }
 
     if (existingUser?.email === email) {
-      throw new ConflictException('此 Email 已註冊。');
+      throw new ConflictException('Email is already registered.');
     }
 
     const passwordHash = await argon2.hash(registerDto.password);
@@ -105,13 +105,13 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('帳號或密碼錯誤。');
+      throw new UnauthorizedException('Invalid phone, email, or password.');
     }
 
     const isPasswordValid = await argon2.verify(user.passwordHash, loginDto.password);
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('帳號或密碼錯誤。');
+      throw new UnauthorizedException('Invalid phone, email, or password.');
     }
 
     const syncedUser = await this.syncBootstrapAdminRole({
@@ -143,7 +143,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('登入狀態已失效，請重新登入。');
+      throw new UnauthorizedException('Session is invalid or has expired.');
     }
 
     const syncedUser = await this.syncBootstrapAdminRole(user);
@@ -180,7 +180,7 @@ export class AuthService {
 
     return {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: secure ? 'none' : 'lax',
       secure,
       path: '/',
     };
@@ -190,7 +190,7 @@ export class AuthService {
     const [payloadPart, signaturePart] = sessionToken.split('.');
 
     if (!payloadPart || !signaturePart) {
-      throw new UnauthorizedException('登入狀態已失效，請重新登入。');
+      throw new UnauthorizedException('Session is invalid or has expired.');
     }
 
     const expectedSignature = this.signPayload(payloadPart);
@@ -201,14 +201,14 @@ export class AuthService {
       providedSignature.length !== safeExpectedSignature.length ||
       !timingSafeEqual(providedSignature, safeExpectedSignature)
     ) {
-      throw new UnauthorizedException('登入狀態已失效，請重新登入。');
+      throw new UnauthorizedException('Session is invalid or has expired.');
     }
 
     const decoded = Buffer.from(payloadPart, 'base64url').toString('utf8');
     const payload = this.parseSessionPayload(decoded);
 
     if (!payload.sub || !payload.exp || payload.exp < Date.now()) {
-      throw new UnauthorizedException('登入狀態已失效，請重新登入。');
+      throw new UnauthorizedException('Session is invalid or has expired.');
     }
 
     return payload;
@@ -220,7 +220,7 @@ export class AuthService {
     try {
       parsed = JSON.parse(value);
     } catch {
-      throw new UnauthorizedException('登入狀態已失效，請重新登入。');
+      throw new UnauthorizedException('Session is invalid or has expired.');
     }
 
     if (
@@ -231,7 +231,7 @@ export class AuthService {
       typeof parsed.sub !== 'string' ||
       typeof parsed.exp !== 'number'
     ) {
-      throw new UnauthorizedException('登入狀態已失效，請重新登入。');
+      throw new UnauthorizedException('Session is invalid or has expired.');
     }
 
     return {
@@ -246,7 +246,7 @@ export class AuthService {
       (process.env.NODE_ENV === 'production' ? undefined : 'dev-only-change-me');
 
     if (!secret) {
-      throw new InternalServerErrorException('AUTH_SECRET 尚未設定。');
+      throw new InternalServerErrorException('AUTH_SECRET is missing.');
     }
 
     return createHmac('sha256', secret).update(payload).digest('base64url');
@@ -286,10 +286,7 @@ export class AuthService {
       .map((value) => value.trim())
       .filter(Boolean);
 
-    return (
-      allowedPhones.includes(normalizedPhone) ||
-      allowedEmails.includes(normalizedEmail)
-    );
+    return allowedPhones.includes(normalizedPhone) || allowedEmails.includes(normalizedEmail);
   }
 
   private toAuthUser(user: AuthUserRecord): AuthUser {
