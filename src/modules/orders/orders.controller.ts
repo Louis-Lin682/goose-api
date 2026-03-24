@@ -1,4 +1,11 @@
-import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService, type AuthUser } from '../auth/auth.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import {
@@ -22,7 +29,12 @@ export class OrdersController {
     @Headers('cookie') cookieHeader?: string,
   ): Promise<CreateOrderResponse> {
     const user = await this.getAuthenticatedUser(cookieHeader);
-    return this.ordersService.createOrder(createOrderDto, user?.id);
+
+    if (!user) {
+      throw new UnauthorizedException('Please log in before checking out.');
+    }
+
+    return this.ordersService.createOrder(createOrderDto, user.id);
   }
 
   @Get()

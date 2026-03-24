@@ -1,15 +1,20 @@
-import { Body, Controller, Get, Headers, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import {
   AuthService,
   type AuthUser,
+  type ForgotPasswordResponse,
   type LoginResponse,
   type RegisterResponse,
+  type ResetPasswordResponse,
 } from './auth.service';
 
 const AUTH_COOKIE_NAME = 'goose_session';
+const LINE_AUTH_COOKIE_NAME = 'goose_line_oauth';
 
 @Controller('auth')
 export class AuthController {
@@ -31,9 +36,74 @@ export class AuthController {
       Boolean(loginDto.remember),
     );
 
-    response.cookie(AUTH_COOKIE_NAME, sessionToken, this.authService.getCookieOptions(Boolean(loginDto.remember)));
+    response.cookie(
+      AUTH_COOKIE_NAME,
+      sessionToken,
+      this.authService.getCookieOptions(Boolean(loginDto.remember)),
+    );
 
     return result;
+  }
+
+  @Get('line/start')
+  lineStart(
+    @Query('mode') mode: 'login' | 'register' | undefined,
+    @Res() response: Response,
+  ): void {
+    const lineMode = mode === 'register' ? 'register' : 'login';
+    const { authorizationUrl, stateCookie } = this.authService.createLineAuthorizationUrl(lineMode);
+
+    response.cookie(
+      LINE_AUTH_COOKIE_NAME,
+      stateCookie,
+      this.authService.getLineStateCookieOptions(),
+    );
+    response.redirect(authorizationUrl);
+  }
+
+  @Get('line/callback')
+  async lineCallback(
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    try {
+      const stateCookie = this.getCookieValue(cookieHeader, LINE_AUTH_COOKIE_NAME);
+      const result = await this.authService.handleLineCallback({
+        code,
+        state,
+        stateCookie,
+      });
+      const sessionToken = this.authService.createSessionToken(result.user.id, true);
+
+      response.cookie(AUTH_COOKIE_NAME, sessionToken, this.authService.getCookieOptions(true));
+      response.clearCookie(
+        LINE_AUTH_COOKIE_NAME,
+        this.authService.getClearLineStateCookieOptions(),
+      );
+      response.redirect(result.redirectUrl);
+    } catch (error) {
+      response.clearCookie(
+        LINE_AUTH_COOKIE_NAME,
+        this.authService.getClearLineStateCookieOptions(),
+      );
+      response.redirect(this.authService.getLineFailureRedirectUrl(error));
+    }
+  }
+
+  @Post('forgot-password')
+  forgotPassword(
+    @Body() forgotPasswordDto: ForgotPasswordDto,
+  ): Promise<ForgotPasswordResponse> {
+    return this.authService.forgotPassword(forgotPasswordDto);
+  }
+
+  @Post('reset-password')
+  resetPassword(
+    @Body() resetPasswordDto: ResetPasswordDto,
+  ): Promise<ResetPasswordResponse> {
+    return this.authService.resetPassword(resetPasswordDto);
   }
 
   @Get('me')

@@ -1,22 +1,36 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as argon2 from 'argon2';
 import type { CookieOptions } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
-const SEVEN_DAYS_IN_MS = 7 * 24 * 60 * 60 * 1000;
-const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
+const SESSION_TIMEOUT_IN_MS = 30 * 60 * 1000;
+const PASSWORD_RESET_TOKEN_TTL_IN_MS = 30 * 60 * 1000;
+const LINE_STATE_TIMEOUT_IN_MS = 10 * 60 * 1000;
+const LINE_AUTH_BASE_URL = 'https://access.line.me/oauth2/v2.1/authorize';
+const LINE_TOKEN_URL = 'https://api.line.me/oauth2/v2.1/token';
+const LINE_VERIFY_ID_TOKEN_URL = 'https://api.line.me/oauth2/v2.1/verify';
 
 type SessionPayload = {
   sub: string;
+  exp: number;
+};
+
+type LineStatePayload = {
+  state: string;
+  nonce: string;
+  mode: 'login' | 'register';
   exp: number;
 };
 
@@ -25,7 +39,28 @@ type AuthUserRecord = {
   name: string;
   phone: string;
   email: string;
+  address: string | null;
   role: UserRole;
+  lineUserId?: string | null;
+  linePictureUrl?: string | null;
+};
+
+type LineCallbackArgs = {
+  code: string | undefined;
+  state: string | undefined;
+  stateCookie: string | null;
+};
+
+type LineTokenResponse = {
+  access_token: string;
+  id_token: string;
+};
+
+type LineVerifiedProfile = {
+  sub: string;
+  name?: string;
+  picture?: string;
+  email?: string;
 };
 
 export type AuthUser = {
@@ -33,6 +68,7 @@ export type AuthUser = {
   name: string;
   phone: string;
   email: string;
+  address: string | null;
   role: UserRole;
   isAdmin: boolean;
 };
@@ -44,6 +80,17 @@ export type RegisterResponse = {
 export type LoginResponse = {
   message: string;
   user: AuthUser;
+};
+
+export type ForgotPasswordResponse = {
+  message: string;
+  resetToken?: string;
+  resetLink?: string;
+  expiresAt?: string;
+};
+
+export type ResetPasswordResponse = {
+  message: string;
 };
 
 @Injectable()
@@ -99,8 +146,11 @@ export class AuthService {
         name: true,
         phone: true,
         email: true,
+        address: true,
         passwordHash: true,
         role: true,
+        lineUserId: true,
+        linePictureUrl: true,
       },
     });
 
@@ -119,12 +169,170 @@ export class AuthService {
       name: user.name,
       phone: user.phone,
       email: user.email,
+      address: user.address,
       role: user.role,
+      lineUserId: user.lineUserId,
+      linePictureUrl: user.linePictureUrl,
     });
 
     return {
       message: 'Login success',
       user: this.toAuthUser(syncedUser),
+    };
+  }
+
+  createLineAuthorizationUrl(mode: 'login' | 'register'): {
+    authorizationUrl: string;
+    stateCookie: string;
+  } {
+    const state = randomBytes(16).toString('hex');
+    const nonce = randomBytes(16).toString('hex');
+    const callbackUrl = this.getLineLoginRedirectUri();
+    const channelId = this.getRequiredLineConfig('LINE_LOGIN_CHANNEL_ID');
+    const stateCookie = this.createSignedStateToken({
+      state,
+      nonce,
+      mode,
+      exp: Date.now() + LINE_STATE_TIMEOUT_IN_MS,
+    });
+
+    const url = new URL(LINE_AUTH_BASE_URL);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', channelId);
+    url.searchParams.set('redirect_uri', callbackUrl);
+    url.searchParams.set('state', state);
+    url.searchParams.set('scope', 'openid profile');
+    url.searchParams.set('nonce', nonce);
+
+    return {
+      authorizationUrl: url.toString(),
+      stateCookie,
+    };
+  }
+
+  async handleLineCallback(args: LineCallbackArgs): Promise<{ user: AuthUser; redirectUrl: string }> {
+    if (!args.code || !args.state) {
+      throw new BadRequestException('LINE login callback is missing required parameters.');
+    }
+
+    const storedState = this.verifySignedStateToken(args.stateCookie);
+
+    if (storedState.state !== args.state) {
+      throw new UnauthorizedException('LINE login state verification failed.');
+    }
+
+    const tokenResponse = await this.exchangeLineCodeForToken(args.code);
+    const verifiedProfile = await this.verifyLineIdToken(tokenResponse.id_token, storedState.nonce);
+    const user = await this.findOrCreateLineUser(verifiedProfile);
+
+    return {
+      user: this.toAuthUser(user),
+      redirectUrl: this.getLineSuccessRedirectUrl(user.role === UserRole.ADMIN),
+    };
+  }
+
+  async forgotPassword(
+    forgotPasswordDto: ForgotPasswordDto,
+  ): Promise<ForgotPasswordResponse> {
+    const identifier = forgotPasswordDto.identifier.trim();
+    const normalizedEmail = identifier.toLowerCase();
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ phone: identifier }, { email: normalizedEmail }],
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    if (!user) {
+      return {
+        message: 'If the account exists, a reset link has been prepared.',
+      };
+    }
+
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = this.hashResetToken(rawToken);
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_IN_MS);
+
+    await this.prisma.passwordResetToken.deleteMany({
+      where: {
+        OR: [
+          { userId: user.id },
+          { expiresAt: { lt: new Date() } },
+        ],
+      },
+    });
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    const response: ForgotPasswordResponse = {
+      message: 'If the account exists, a reset link has been prepared.',
+    };
+
+    if (this.shouldExposeResetToken()) {
+      const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+      const resetLink = `${frontendAppUrl}/forgot-password?token=${rawToken}`;
+
+      response.resetToken = rawToken;
+      response.resetLink = resetLink;
+      response.expiresAt = expiresAt.toISOString();
+    }
+
+    return response;
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<ResetPasswordResponse> {
+    const tokenHash = this.hashResetToken(resetPasswordDto.token.trim());
+
+    const resetToken = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash,
+        usedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
+
+    if (!resetToken) {
+      throw new UnauthorizedException('Reset link is invalid or has expired.');
+    }
+
+    const passwordHash = await argon2.hash(resetPasswordDto.password);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: resetToken.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.passwordResetToken.deleteMany({
+        where: {
+          userId: resetToken.userId,
+          usedAt: null,
+          id: { not: resetToken.id },
+        },
+      }),
+    ]);
+
+    return {
+      message: 'Password has been reset successfully.',
     };
   }
 
@@ -138,7 +346,10 @@ export class AuthService {
         name: true,
         phone: true,
         email: true,
+        address: true,
         role: true,
+        lineUserId: true,
+        linePictureUrl: true,
       },
     });
 
@@ -150,8 +361,8 @@ export class AuthService {
     return this.toAuthUser(syncedUser);
   }
 
-  createSessionToken(userId: string, remember: boolean): string {
-    const expiresAt = Date.now() + (remember ? SEVEN_DAYS_IN_MS : ONE_DAY_IN_MS);
+  createSessionToken(userId: string, _remember: boolean): string {
+    const expiresAt = Date.now() + SESSION_TIMEOUT_IN_MS;
     const payload = Buffer.from(
       JSON.stringify({
         sub: userId,
@@ -164,15 +375,37 @@ export class AuthService {
     return `${payload}.${signature}`;
   }
 
-  getCookieOptions(remember: boolean): CookieOptions {
+  getCookieOptions(_remember: boolean): CookieOptions {
     return {
       ...this.getCookieBaseOptions(),
-      maxAge: remember ? SEVEN_DAYS_IN_MS : ONE_DAY_IN_MS,
+      maxAge: SESSION_TIMEOUT_IN_MS,
     };
   }
 
   getClearCookieOptions(): CookieOptions {
     return this.getCookieBaseOptions();
+  }
+
+  getLineStateCookieOptions(): CookieOptions {
+    return {
+      ...this.getCookieBaseOptions(),
+      sameSite: 'lax',
+      maxAge: LINE_STATE_TIMEOUT_IN_MS,
+    };
+  }
+
+  getClearLineStateCookieOptions(): CookieOptions {
+    return {
+      ...this.getLineStateCookieOptions(),
+      maxAge: undefined,
+    };
+  }
+
+  getLineFailureRedirectUrl(error: unknown): string {
+    const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+    const message = error instanceof Error ? error.message : 'LINE login failed.';
+
+    return `${frontendAppUrl}/auth/line/complete?status=error&message=${encodeURIComponent(message)}`;
   }
 
   private getCookieBaseOptions(): CookieOptions {
@@ -240,6 +473,44 @@ export class AuthService {
     };
   }
 
+  private createSignedStateToken(payload: LineStatePayload): string {
+    const rawPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const signature = this.signPayload(rawPayload);
+
+    return `${rawPayload}.${signature}`;
+  }
+
+  private verifySignedStateToken(token: string | null): LineStatePayload {
+    if (!token) {
+      throw new UnauthorizedException('LINE login session has expired.');
+    }
+
+    const [payloadPart, signaturePart] = token.split('.');
+
+    if (!payloadPart || !signaturePart) {
+      throw new UnauthorizedException('LINE login session is invalid.');
+    }
+
+    const expectedSignature = this.signPayload(payloadPart);
+    const providedSignature = Buffer.from(signaturePart, 'utf8');
+    const safeExpectedSignature = Buffer.from(expectedSignature, 'utf8');
+
+    if (
+      providedSignature.length !== safeExpectedSignature.length ||
+      !timingSafeEqual(providedSignature, safeExpectedSignature)
+    ) {
+      throw new UnauthorizedException('LINE login session is invalid.');
+    }
+
+    const parsed = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8')) as LineStatePayload;
+
+    if (!parsed.state || !parsed.nonce || !parsed.mode || parsed.exp < Date.now()) {
+      throw new UnauthorizedException('LINE login session has expired.');
+    }
+
+    return parsed;
+  }
+
   private signPayload(payload: string): string {
     const secret =
       process.env.AUTH_SECRET ??
@@ -250,6 +521,202 @@ export class AuthService {
     }
 
     return createHmac('sha256', secret).update(payload).digest('base64url');
+  }
+
+  private hashResetToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private shouldExposeResetToken(): boolean {
+    return process.env.NODE_ENV !== 'production' || process.env.PASSWORD_RESET_DEBUG === 'true';
+  }
+
+  private getRequiredLineConfig(key: 'LINE_LOGIN_CHANNEL_ID' | 'LINE_LOGIN_CHANNEL_SECRET'): string {
+    const value = process.env[key]?.trim();
+
+    if (!value) {
+      throw new InternalServerErrorException(`${key} is missing.`);
+    }
+
+    return value;
+  }
+
+  private getLineLoginRedirectUri(): string {
+    const explicitRedirectUri = process.env.LINE_LOGIN_REDIRECT_URI?.trim();
+
+    if (explicitRedirectUri) {
+      return explicitRedirectUri;
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      const frontendAppUrl = process.env.FRONTEND_APP_URL?.trim();
+
+      if (!frontendAppUrl) {
+        throw new InternalServerErrorException('FRONTEND_APP_URL is missing.');
+      }
+
+      return `${frontendAppUrl.replace(/\/$/, '')}/api/auth/line/callback`;
+    }
+
+    const backendBaseUrl = (process.env.BACKEND_BASE_URL ?? 'http://localhost:3001').trim();
+    return `${backendBaseUrl.replace(/\/$/, '')}/auth/line/callback`;
+  }
+
+  private getLineSuccessRedirectUrl(isAdmin: boolean): string {
+    const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+    const next = isAdmin ? '/admin/notifications' : '/';
+
+    return `${frontendAppUrl}/auth/line/complete?next=${encodeURIComponent(next)}`;
+  }
+
+  private async exchangeLineCodeForToken(code: string): Promise<LineTokenResponse> {
+    const response = await fetch(LINE_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: this.getLineLoginRedirectUri(),
+        client_id: this.getRequiredLineConfig('LINE_LOGIN_CHANNEL_ID'),
+        client_secret: this.getRequiredLineConfig('LINE_LOGIN_CHANNEL_SECRET'),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new UnauthorizedException('Failed to exchange LINE authorization code.');
+    }
+
+    const data = (await response.json()) as Partial<LineTokenResponse>;
+
+    if (!data.access_token || !data.id_token) {
+      throw new UnauthorizedException('LINE token response is incomplete.');
+    }
+
+    return {
+      access_token: data.access_token,
+      id_token: data.id_token,
+    };
+  }
+
+  private async verifyLineIdToken(idToken: string, nonce: string): Promise<LineVerifiedProfile> {
+    const response = await fetch(LINE_VERIFY_ID_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        id_token: idToken,
+        client_id: this.getRequiredLineConfig('LINE_LOGIN_CHANNEL_ID'),
+        nonce,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new UnauthorizedException('Failed to verify LINE ID token.');
+    }
+
+    const data = (await response.json()) as LineVerifiedProfile;
+
+    if (!data.sub) {
+      throw new UnauthorizedException('LINE ID token is missing the user identifier.');
+    }
+
+    return data;
+  }
+
+  private async findOrCreateLineUser(profile: LineVerifiedProfile): Promise<AuthUserRecord> {
+    const existingLineUser = await this.prisma.user.findFirst({
+      where: {
+        lineUserId: profile.sub,
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        role: true,
+        lineUserId: true,
+        linePictureUrl: true,
+      },
+    });
+
+    if (existingLineUser) {
+      return this.syncBootstrapAdminRole(existingLineUser);
+    }
+
+    const normalizedEmail = profile.email?.trim().toLowerCase();
+
+    if (normalizedEmail) {
+      const existingEmailUser = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          address: true,
+          role: true,
+          lineUserId: true,
+          linePictureUrl: true,
+        },
+      });
+
+      if (existingEmailUser) {
+        const linkedUser = await this.prisma.user.update({
+          where: { id: existingEmailUser.id },
+          data: {
+            lineUserId: profile.sub,
+            linePictureUrl: profile.picture ?? existingEmailUser.linePictureUrl,
+          },
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            address: true,
+            role: true,
+            lineUserId: true,
+            linePictureUrl: true,
+          },
+        });
+
+        return this.syncBootstrapAdminRole(linkedUser);
+      }
+    }
+
+    const syntheticPhone = `line_${profile.sub.slice(-10)}`;
+    const syntheticEmail = normalizedEmail ?? `line_${profile.sub.toLowerCase()}@login.goose.local`;
+    const passwordHash = await argon2.hash(randomBytes(24).toString('hex'));
+
+    const createdUser = await this.prisma.user.create({
+      data: {
+        name: profile.name?.trim() || 'LINE User',
+        phone: syntheticPhone,
+        email: syntheticEmail,
+        passwordHash,
+        role: this.resolveBootstrapRole({
+          email: syntheticEmail,
+          phone: syntheticPhone,
+        }),
+        lineUserId: profile.sub,
+        linePictureUrl: profile.picture ?? null,
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        role: true,
+        lineUserId: true,
+        linePictureUrl: true,
+      },
+    });
+
+    return this.syncBootstrapAdminRole(createdUser);
   }
 
   private resolveBootstrapRole(user: { email: string; phone: string }): UserRole {
@@ -269,7 +736,10 @@ export class AuthService {
         name: true,
         phone: true,
         email: true,
+        address: true,
         role: true,
+        lineUserId: true,
+        linePictureUrl: true,
       },
     });
   }
@@ -295,6 +765,7 @@ export class AuthService {
       name: user.name,
       phone: user.phone,
       email: user.email,
+      address: user.address,
       role: user.role,
       isAdmin: user.role === UserRole.ADMIN,
     };

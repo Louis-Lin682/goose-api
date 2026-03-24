@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { OrderStatus } from '@prisma/client';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import {
   OrdersService,
+  type AdminProductStatsPreset,
+  type AdminProductStatsResponse,
   type OrderHistoryResponse,
   type UpdateOrderStatusResponse,
 } from './orders.service';
@@ -16,6 +18,19 @@ export class AdminOrdersController {
   @Get()
   getAdminOrders(): Promise<OrderHistoryResponse> {
     return this.ordersService.getAdminOrders();
+  }
+
+  @Get('product-stats')
+  getAdminProductStats(
+    @Query('preset') preset?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ): Promise<AdminProductStatsResponse> {
+    return this.ordersService.getAdminProductStats({
+      preset: (preset as AdminProductStatsPreset | undefined) ?? 'today',
+      startDate,
+      endDate,
+    });
   }
 
   @Patch(':orderId/status')

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -56,7 +56,7 @@ export class NotificationsService {
       data: {
         type: NotificationType.NEW_ORDER,
         title: `新訂單 ${input.orderNumber}`,
-        message: `${input.recipientName} 建立了新訂單，訂單金額 $${input.totalAmount}。`,
+        message: `${input.recipientName} 建立了一筆新訂單，總金額為 $${input.totalAmount}。`,
         orderId: input.orderId,
         recipients: {
           create: adminUsers.map((adminUser) => ({
@@ -140,12 +140,10 @@ export class NotificationsService {
       throw new NotFoundException('找不到指定通知。');
     }
 
-    await this.prisma.notificationRecipient.update({
+    await this.prisma.notificationRecipient.updateMany({
       where: {
-        notificationId_userId: {
-          notificationId,
-          userId,
-        },
+        notificationId,
+        isRead: false,
       },
       data: {
         isRead: true,
@@ -159,10 +157,33 @@ export class NotificationsService {
     };
   }
 
+  async markOrderNotificationsAsRead(orderId: string): Promise<void> {
+    await this.prisma.notificationRecipient.updateMany({
+      where: {
+        notification: {
+          orderId,
+        },
+        isRead: false,
+      },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+  }
+
   async markAllAsRead(userId: string): Promise<MarkAllNotificationsReadResponse> {
+    const hasAnyRecipient = await this.prisma.notificationRecipient.findFirst({
+      where: { userId },
+      select: { notificationId: true },
+    });
+
+    if (!hasAnyRecipient) {
+      throw new NotFoundException('找不到可更新的通知。');
+    }
+
     const result = await this.prisma.notificationRecipient.updateMany({
       where: {
-        userId,
         isRead: false,
       },
       data: {

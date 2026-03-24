@@ -64,6 +64,38 @@ export type UpdateOrderStatusResponse = {
   status: string;
 };
 
+export type AdminProductStatsPreset = 'today' | 'this-month' | 'last-month' | 'custom';
+
+export type AdminProductStatsFilters = {
+  preset?: AdminProductStatsPreset;
+  startDate?: string;
+  endDate?: string;
+};
+
+export type AdminProductStatPoint = {
+  productKey: string;
+  productName: string;
+  category: string;
+  subCategory: string;
+  variant: string;
+  quantitySold: number;
+  revenue: number;
+  orderCount: number;
+};
+
+export type AdminProductStatsResponse = {
+  range: {
+    preset: AdminProductStatsPreset;
+    label: string;
+    startDate: string;
+    endDate: string;
+  };
+  totalRevenue: number;
+  totalOrders: number;
+  totalItemsSold: number;
+  topProducts: AdminProductStatPoint[];
+};
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -95,11 +127,11 @@ export class OrdersService {
     );
 
     if (createOrderDto.shippingFee !== expectedShippingFee) {
-      throw new BadRequestException('運費金額與目前訂單規則不一致。');
+      throw new BadRequestException('Shipping fee does not match the expected amount.');
     }
 
     if (createOrderDto.codFee !== expectedCodFee) {
-      throw new BadRequestException('貨到付款手續費與目前訂單規則不一致。');
+      throw new BadRequestException('COD fee does not match the expected amount.');
     }
 
     const orderNumber = this.createOrderNumber();
@@ -110,29 +142,48 @@ export class OrdersService {
     const note = createOrderDto.note?.trim() || null;
 
     if (createOrderDto.deliveryMethod === DeliveryMethod.home && !recipientAddress) {
-      throw new BadRequestException('??????????');
+      throw new BadRequestException('Recipient address is required for home delivery.');
     }
+
     const totalAmount = subtotal + expectedShippingFee + expectedCodFee;
 
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber,
-        deliveryMethod: createOrderDto.deliveryMethod,
-        paymentMethod: createOrderDto.paymentMethod,
-        recipientName,
-        recipientPhone,
-        recipientEmail,
-        recipientAddress,
-        note,
-        subtotal,
-        shippingFee: expectedShippingFee,
-        codFee: expectedCodFee,
-        totalAmount,
-        userId,
-        items: {
-          create: normalizedItems,
+    const order = await this.prisma.$transaction(async (tx) => {
+      const createdOrder = await tx.order.create({
+        data: {
+          orderNumber,
+          deliveryMethod: createOrderDto.deliveryMethod,
+          paymentMethod: createOrderDto.paymentMethod,
+          recipientName,
+          recipientPhone,
+          recipientEmail,
+          recipientAddress,
+          note,
+          subtotal,
+          shippingFee: expectedShippingFee,
+          codFee: expectedCodFee,
+          totalAmount,
+          userId,
+          items: {
+            create: normalizedItems,
+          },
         },
-      },
+      });
+
+      if (userId && recipientAddress) {
+        const existingUser = await tx.user.findUnique({
+          where: { id: userId },
+          select: { address: true },
+        });
+
+        if (existingUser && !existingUser.address?.trim()) {
+          await tx.user.update({
+            where: { id: userId },
+            data: { address: recipientAddress },
+          });
+        }
+      }
+
+      return createdOrder;
     });
 
     try {
@@ -155,7 +206,7 @@ export class OrdersService {
 
   async getOrderHistory(userId?: string): Promise<OrderHistoryResponse> {
     if (!userId) {
-      throw new UnauthorizedException('請先登入後再查看訂單。');
+      throw new UnauthorizedException('Please log in first to view order history.');
     }
 
     const orders = await this.prisma.order.findMany({
@@ -188,6 +239,97 @@ export class OrdersService {
     };
   }
 
+  async getAdminProductStats(
+    filters: AdminProductStatsFilters,
+  ): Promise<AdminProductStatsResponse> {
+    const range = this.resolveStatsRange(filters);
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: {
+          not: OrderStatus.CANCELLED,
+        },
+        createdAt: {
+          gte: range.start,
+          lte: range.end,
+        },
+      },
+      include: {
+        items: true,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    const productMap = new Map<string, AdminProductStatPoint>();
+
+    for (const order of orders) {
+      const countedKeys = new Set<string>();
+
+      for (const item of order.items) {
+        const productKey = `${item.itemName}::${item.itemSubCategory}::${item.variant}`;
+        const current = productMap.get(productKey);
+
+        if (current) {
+          current.quantitySold += item.quantity;
+          current.revenue += item.lineTotal;
+
+          if (!countedKeys.has(productKey)) {
+            current.orderCount += 1;
+          }
+        } else {
+          productMap.set(productKey, {
+            productKey,
+            productName: item.itemName,
+            category: item.itemCategory,
+            subCategory: item.itemSubCategory,
+            variant: item.variant,
+            quantitySold: item.quantity,
+            revenue: item.lineTotal,
+            orderCount: 1,
+          });
+        }
+
+        countedKeys.add(productKey);
+      }
+    }
+
+    const topProducts = Array.from(productMap.values())
+      .sort((left, right) => {
+        if (right.quantitySold !== left.quantitySold) {
+          return right.quantitySold - left.quantitySold;
+        }
+
+        if (right.revenue !== left.revenue) {
+          return right.revenue - left.revenue;
+        }
+
+        return left.productName.localeCompare(right.productName);
+      })
+      .slice(0, 10);
+
+    const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const totalItemsSold = orders.reduce(
+      (sum, order) =>
+        sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0),
+      0,
+    );
+
+    return {
+      range: {
+        preset: range.preset,
+        label: range.label,
+        startDate: this.formatDateOnly(range.start),
+        endDate: this.formatDateOnly(range.end),
+      },
+      totalRevenue,
+      totalOrders: orders.length,
+      totalItemsSold,
+      topProducts,
+    };
+  }
+
   async updateOrderStatus(
     orderId: string,
     status: OrderStatus,
@@ -198,7 +340,7 @@ export class OrdersService {
     });
 
     if (!existingOrder) {
-      throw new NotFoundException('找不到這筆訂單。');
+      throw new NotFoundException('Order not found.');
     }
 
     const order = await this.prisma.order.update({
@@ -209,6 +351,8 @@ export class OrdersService {
         status: true,
       },
     });
+
+    await this.notificationsService.markOrderNotificationsAsRead(orderId);
 
     return {
       message: 'Order status updated successfully',
@@ -281,6 +425,109 @@ export class OrdersService {
     }));
   }
 
+  private resolveStatsRange(filters: AdminProductStatsFilters) {
+    const normalizedPreset = this.normalizePreset(filters.preset);
+
+    if (filters.startDate && filters.endDate) {
+      const start = this.parseDateBoundary(filters.startDate, 'start');
+      const end = this.parseDateBoundary(filters.endDate, 'end');
+
+      if (start > end) {
+        throw new BadRequestException('Start date cannot be later than end date.');
+      }
+
+      return {
+        preset: normalizedPreset,
+        label: this.getRangeLabel(normalizedPreset),
+        start,
+        end,
+      };
+    }
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    if (normalizedPreset === 'today') {
+      return {
+        preset: normalizedPreset,
+        label: this.getRangeLabel(normalizedPreset),
+        start: todayStart,
+        end: todayEnd,
+      };
+    }
+
+    if (normalizedPreset === 'this-month') {
+      return {
+        preset: normalizedPreset,
+        label: this.getRangeLabel(normalizedPreset),
+        start: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0),
+        end: todayEnd,
+      };
+    }
+
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+    return {
+      preset: normalizedPreset,
+      label: this.getRangeLabel(normalizedPreset),
+      start: lastMonthStart,
+      end: lastMonthEnd,
+    };
+  }
+
+  private normalizePreset(
+    preset?: AdminProductStatsPreset | string,
+  ): AdminProductStatsPreset {
+    switch (preset) {
+      case 'this-month':
+      case 'last-month':
+      case 'custom':
+      case 'today':
+        return preset;
+      default:
+        return 'today';
+    }
+  }
+
+  private getRangeLabel(preset: AdminProductStatsPreset) {
+    switch (preset) {
+      case 'today':
+        return '?????';
+      case 'this-month':
+        return '???';
+      case 'last-month':
+        return '????';
+      case 'custom':
+        return '???????';
+      default:
+        return '?????';
+    }
+  }
+
+  private parseDateBoundary(value: string, boundary: 'start' | 'end') {
+    const date = new Date(`${value}T00:00:00.000`);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid date range.');
+    }
+
+    if (boundary === 'end') {
+      date.setHours(23, 59, 59, 999);
+    }
+
+    return date;
+  }
+
+  private formatDateOnly(value: Date) {
+    const year = value.getFullYear();
+    const month = `${value.getMonth() + 1}`.padStart(2, '0');
+    const day = `${value.getDate()}`.padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
   private getShippingFee(subtotal: number, deliveryMethod: DeliveryMethod) {
     if (deliveryMethod === DeliveryMethod.pickup) {
       return 0;
@@ -333,3 +580,4 @@ export class OrdersService {
     return `GO${yyyymmdd}${suffix}`;
   }
 }
+

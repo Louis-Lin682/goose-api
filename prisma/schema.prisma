@@ -1,24 +1,31 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// This is your Prisma schema file.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
   provider = "postgresql"
 }
+
 model User {
   id                     String                  @id @default(cuid())
   name                   String
   phone                  String                  @unique
   email                  String                  @unique
+  address                String?
   passwordHash           String
   role                   UserRole                @default(CUSTOMER)
+  lineUserId             String?                 @unique
+  linePictureUrl         String?
   orders                 Order[]
   notificationRecipients NotificationRecipient[]
+  passwordResetTokens    PasswordResetToken[]
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
 }
+
 model Product {
   id            String   @id
   category      String
@@ -34,6 +41,7 @@ model Product {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
+
 model Order {
   id               String          @id @default(cuid())
   orderNumber      String          @unique
@@ -61,6 +69,7 @@ model Order {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
+
 model OrderItem {
   id              String   @id @default(cuid())
   orderId         String
@@ -75,6 +84,7 @@ model OrderItem {
   order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
 }
+
 model Notification {
   id         String                  @id @default(cuid())
   type       NotificationType
@@ -85,6 +95,7 @@ model Notification {
   recipients NotificationRecipient[]
   createdAt  DateTime                @default(now())
 }
+
 model NotificationRecipient {
   id             String       @id @default(cuid())
   notificationId String
@@ -94,25 +105,43 @@ model NotificationRecipient {
   createdAt      DateTime     @default(now())
   notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([notificationId, userId])
   @@index([userId, isRead, createdAt])
 }
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
 enum DeliveryMethod {
   home
   pickup
 }
+
 enum PaymentMethod {
   online
   cod
 }
+
 enum PaymentStatus {
   UNPAID
   PAID
   FAILED
 }
+
 enum PaymentProvider {
   ECPAY
 }
+
 enum OrderStatus {
   PENDING
   PAID
@@ -121,10 +150,12 @@ enum OrderStatus {
   COMPLETED
   CANCELLED
 }
+
 enum UserRole {
   CUSTOMER
   ADMIN
 }
+
 enum NotificationType {
   NEW_ORDER
 }
