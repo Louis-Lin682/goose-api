@@ -14,7 +14,6 @@ import {
 } from './auth.service';
 
 const AUTH_COOKIE_NAME = 'goose_session';
-const LINE_AUTH_COOKIE_NAME = 'goose_line_oauth';
 
 @Controller('auth')
 export class AuthController {
@@ -51,13 +50,7 @@ export class AuthController {
     @Res() response: Response,
   ): void {
     const lineMode = mode === 'register' ? 'register' : 'login';
-    const { authorizationUrl, stateCookie } = this.authService.createLineAuthorizationUrl(lineMode);
-
-    response.cookie(
-      LINE_AUTH_COOKIE_NAME,
-      stateCookie,
-      this.authService.getLineStateCookieOptions(),
-    );
+    const { authorizationUrl } = this.authService.createLineAuthorizationUrl(lineMode);
     response.redirect(authorizationUrl);
   }
 
@@ -65,29 +58,15 @@ export class AuthController {
   async lineCallback(
     @Query('code') code: string | undefined,
     @Query('state') state: string | undefined,
-    @Headers('cookie') cookieHeader: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
     try {
-      const stateCookie = this.getCookieValue(cookieHeader, LINE_AUTH_COOKIE_NAME);
-      const result = await this.authService.handleLineCallback({
-        code,
-        state,
-        stateCookie,
-      });
+      const result = await this.authService.handleLineCallback({ code, state });
       const sessionToken = this.authService.createSessionToken(result.user.id, true);
 
       response.cookie(AUTH_COOKIE_NAME, sessionToken, this.authService.getCookieOptions(true));
-      response.clearCookie(
-        LINE_AUTH_COOKIE_NAME,
-        this.authService.getClearLineStateCookieOptions(),
-      );
       response.redirect(result.redirectUrl);
     } catch (error) {
-      response.clearCookie(
-        LINE_AUTH_COOKIE_NAME,
-        this.authService.getClearLineStateCookieOptions(),
-      );
       response.redirect(this.authService.getLineFailureRedirectUrl(error));
     }
   }

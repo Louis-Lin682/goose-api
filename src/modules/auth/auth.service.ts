@@ -28,7 +28,6 @@ type SessionPayload = {
 };
 
 type LineStatePayload = {
-  state: string;
   nonce: string;
   mode: 'login' | 'register';
   exp: number;
@@ -48,7 +47,6 @@ type AuthUserRecord = {
 type LineCallbackArgs = {
   code: string | undefined;
   state: string | undefined;
-  stateCookie: string | null;
 };
 
 type LineTokenResponse = {
@@ -183,14 +181,11 @@ export class AuthService {
 
   createLineAuthorizationUrl(mode: 'login' | 'register'): {
     authorizationUrl: string;
-    stateCookie: string;
   } {
-    const state = randomBytes(16).toString('hex');
     const nonce = randomBytes(16).toString('hex');
     const callbackUrl = this.getLineLoginRedirectUri();
     const channelId = this.getRequiredLineConfig('LINE_LOGIN_CHANNEL_ID');
-    const stateCookie = this.createSignedStateToken({
-      state,
+    const signedState = this.createSignedStateToken({
       nonce,
       mode,
       exp: Date.now() + LINE_STATE_TIMEOUT_IN_MS,
@@ -200,13 +195,12 @@ export class AuthService {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', channelId);
     url.searchParams.set('redirect_uri', callbackUrl);
-    url.searchParams.set('state', state);
+    url.searchParams.set('state', signedState);
     url.searchParams.set('scope', 'openid profile');
     url.searchParams.set('nonce', nonce);
 
     return {
       authorizationUrl: url.toString(),
-      stateCookie,
     };
   }
 
@@ -215,11 +209,7 @@ export class AuthService {
       throw new BadRequestException('LINE login callback is missing required parameters.');
     }
 
-    const storedState = this.verifySignedStateToken(args.stateCookie);
-
-    if (storedState.state !== args.state) {
-      throw new UnauthorizedException('LINE login state verification failed.');
-    }
+    const storedState = this.verifySignedStateToken(args.state);
 
     const tokenResponse = await this.exchangeLineCodeForToken(args.code);
     const verifiedProfile = await this.verifyLineIdToken(tokenResponse.id_token, storedState.nonce);
@@ -386,21 +376,6 @@ export class AuthService {
     return this.getCookieBaseOptions();
   }
 
-  getLineStateCookieOptions(): CookieOptions {
-    return {
-      ...this.getCookieBaseOptions(),
-      sameSite: 'lax',
-      maxAge: LINE_STATE_TIMEOUT_IN_MS,
-    };
-  }
-
-  getClearLineStateCookieOptions(): CookieOptions {
-    return {
-      ...this.getLineStateCookieOptions(),
-      maxAge: undefined,
-    };
-  }
-
   getLineFailureRedirectUrl(error: unknown): string {
     const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
     const message = error instanceof Error ? error.message : 'LINE login failed.';
@@ -504,7 +479,7 @@ export class AuthService {
 
     const parsed = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8')) as LineStatePayload;
 
-    if (!parsed.state || !parsed.nonce || !parsed.mode || parsed.exp < Date.now()) {
+    if (!parsed.nonce || !parsed.mode || parsed.exp < Date.now()) {
       throw new UnauthorizedException('LINE login session has expired.');
     }
 
