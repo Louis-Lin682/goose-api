@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -153,13 +153,13 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid phone, email, or password.');
+      throw new UnauthorizedException('手機、Email 或密碼錯誤。');
     }
 
     const isPasswordValid = await argon2.verify(user.passwordHash, loginDto.password);
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid phone, email, or password.');
+      throw new UnauthorizedException('手機、Email 或密碼錯誤。');
     }
 
     const syncedUser = await this.syncBootstrapAdminRole({
@@ -224,22 +224,20 @@ export class AuthService {
   async forgotPassword(
     forgotPasswordDto: ForgotPasswordDto,
   ): Promise<ForgotPasswordResponse> {
-    const identifier = forgotPasswordDto.identifier.trim();
-    const normalizedEmail = identifier.toLowerCase();
+    const email = forgotPasswordDto.identifier.trim().toLowerCase();
 
-    const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ phone: identifier }, { email: normalizedEmail }],
-      },
+    const user = await this.prisma.user.findUnique({
+      where: { email },
       select: {
         id: true,
         email: true,
+        name: true,
       },
     });
 
     if (!user) {
       return {
-        message: 'If the account exists, a reset link has been prepared.',
+        message: '如果 Email 存在，系統已寄出重設連結。',
       };
     }
 
@@ -249,10 +247,7 @@ export class AuthService {
 
     await this.prisma.passwordResetToken.deleteMany({
       where: {
-        OR: [
-          { userId: user.id },
-          { expiresAt: { lt: new Date() } },
-        ],
+        OR: [{ userId: user.id }, { expiresAt: { lt: new Date() } }],
       },
     });
 
@@ -264,22 +259,32 @@ export class AuthService {
       },
     });
 
+    const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+    const resetLink = `${frontendAppUrl}/forgot-password?token=${rawToken}`;
+
     const response: ForgotPasswordResponse = {
-      message: 'If the account exists, a reset link has been prepared.',
+      message: '如果 Email 存在，系統已寄出重設連結。',
     };
 
     if (this.shouldExposeResetToken()) {
-      const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
-      const resetLink = `${frontendAppUrl}/forgot-password?token=${rawToken}`;
-
       response.resetToken = rawToken;
       response.resetLink = resetLink;
       response.expiresAt = expiresAt.toISOString();
     }
 
+    if (this.hasEmailDeliveryConfig()) {
+      await this.sendPasswordResetEmail({
+        to: user.email,
+        name: user.name,
+        resetLink,
+        expiresAt,
+      });
+    } else if (!this.shouldExposeResetToken()) {
+      throw new InternalServerErrorException('Email 寄送服務尚未設定完成。');
+    }
+
     return response;
   }
-
   async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<ResetPasswordResponse> {
     const tokenHash = this.hashResetToken(resetPasswordDto.token.trim());
 
@@ -298,7 +303,7 @@ export class AuthService {
     });
 
     if (!resetToken) {
-      throw new UnauthorizedException('Reset link is invalid or has expired.');
+      throw new UnauthorizedException('重設連結無效或已過期。');
     }
 
     const passwordHash = await argon2.hash(resetPasswordDto.password);
@@ -322,7 +327,7 @@ export class AuthService {
     ]);
 
     return {
-      message: 'Password has been reset successfully.',
+      message: '密碼已更新成功。',
     };
   }
 
@@ -502,6 +507,69 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  private hasEmailDeliveryConfig(): boolean {
+    return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+  }
+
+  private async sendPasswordResetEmail(args: {
+    to: string;
+    name: string;
+    resetLink: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    const apiKey = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim();
+
+    if (!apiKey || !from) {
+      throw new InternalServerErrorException('Email 寄送服務尚未設定完成。');
+    }
+
+    const replyTo = process.env.EMAIL_REPLY_TO?.trim();
+    const expiryLabel = args.expiresAt.toLocaleString('zh-TW', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const html = `
+      <div style="font-family: Arial, 'Noto Sans TC', sans-serif; line-height: 1.7; color: #18181b;">
+        <h2 style="margin-bottom: 16px;">Hi ${args.name}，請重設你的 Goose 密碼</h2>
+        <p>我們收到你的密碼重設請求，請點下方按鈕完成設定。</p>
+        <p style="margin: 24px 0;">
+          <a href="${args.resetLink}" style="display:inline-block;padding:12px 20px;border-radius:16px;background:#18181b;color:#ffffff;text-decoration:none;font-weight:700;">前往重設密碼</a>
+        </p>
+        <p>這個連結會在 <strong>${expiryLabel}</strong> 前有效。</p>
+        <p>如果不是你本人操作，直接忽略這封信即可。</p>
+      </div>
+    `;
+
+    const payload: Record<string, unknown> = {
+      from,
+      to: [args.to],
+      subject: 'Goose 密碼重設通知',
+      html,
+      text: `Hi ${args.name}，請使用以下連結重設你的 Goose 密碼：${args.resetLink} 。此連結將於 ${expiryLabel} 失效。`,
+    };
+
+    if (replyTo) {
+      payload.reply_to = replyTo;
+    }
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new InternalServerErrorException('重設信寄送失敗，請稍後再試。');
+    }
+  }
   private shouldExposeResetToken(): boolean {
     return process.env.NODE_ENV !== 'production' || process.env.PASSWORD_RESET_DEBUG === 'true';
   }
@@ -746,3 +814,5 @@ export class AuthService {
     };
   }
 }
+
+
