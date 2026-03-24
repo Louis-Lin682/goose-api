@@ -1,9 +1,10 @@
-export type ProductCatalogEntry = {
+﻿export type ProductCatalogEntry = {
   id: string;
   category: string;
   categoryOrder: number;
   subCategory: string;
   name: string;
+  description?: string;
   imageUrl?: string;
   price?: number;
   priceSmall?: number;

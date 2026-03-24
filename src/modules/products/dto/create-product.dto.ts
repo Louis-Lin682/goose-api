@@ -13,6 +13,9 @@ export class CreateProductDto {
   @IsString({ message: 'Product name is required.' })
   name!: string;
   @IsOptional()
+  @IsString({ message: 'Description must be a string.' })
+  description?: string;
+  @IsOptional()
   @IsString({ message: 'Image URL must be a string.' })
   imageUrl?: string;
   @IsOptional()
@@ -36,3 +39,4 @@ export class CreateProductDto {
   @Min(0, { message: 'Sort order must be greater than or equal to 0.' })
   sortOrder?: number;
 }
+

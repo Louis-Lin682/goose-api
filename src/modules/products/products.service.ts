@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+﻿import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { INITIAL_PRODUCT_CATALOG } from './product-catalog';
@@ -11,6 +11,7 @@ export type ProductEntry = {
   categoryOrder: number;
   subCategory: string;
   name: string;
+  description: string | null;
   imageUrl: string | null;
   price: number | null;
   priceSmall: number | null;
@@ -73,6 +74,7 @@ export class ProductsService implements OnModuleInit {
           categoryOrder: item.categoryOrder,
           subCategory: item.subCategory,
           name: item.name,
+          description: item.description ?? null,
           imageUrl: item.imageUrl ?? null,
           price: item.price ?? null,
           priceSmall: item.priceSmall ?? null,
@@ -154,6 +156,7 @@ export class ProductsService implements OnModuleInit {
             categoryOrder: existingCategory.categoryOrder,
             subCategory: createProductDto.subCategory.trim(),
             name: createProductDto.name.trim(),
+            description: createProductDto.description?.trim() || null,
             imageUrl: createProductDto.imageUrl?.trim() || null,
             price: createProductDto.price ?? null,
             priceSmall: createProductDto.priceSmall ?? null,
@@ -188,6 +191,7 @@ export class ProductsService implements OnModuleInit {
           categoryOrder,
           subCategory: createProductDto.subCategory.trim(),
           name: createProductDto.name.trim(),
+          description: createProductDto.description?.trim() || null,
           imageUrl: createProductDto.imageUrl?.trim() || null,
           price: createProductDto.price ?? null,
           priceSmall: createProductDto.priceSmall ?? null,
@@ -201,7 +205,7 @@ export class ProductsService implements OnModuleInit {
     await this.normalizeCategoryOrders();
 
     return {
-      message: '???啣???',
+      message: '?????????',
       product,
     };
   }
@@ -270,6 +274,10 @@ export class ProductsService implements OnModuleInit {
               : updateProductDto.categoryOrder,
           subCategory: updateProductDto.subCategory?.trim(),
           name: updateProductDto.name?.trim(),
+          description:
+            updateProductDto.description === undefined
+              ? undefined
+              : updateProductDto.description?.trim() || null,
           imageUrl:
             updateProductDto.imageUrl === undefined
               ? undefined
@@ -283,7 +291,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '???湔??',
+      message: '????皝????',
       product,
     };
   }
@@ -305,7 +313,7 @@ export class ProductsService implements OnModuleInit {
 
     if (currentCategory.categoryOrder === targetOrder) {
       return {
-        message: '?????湔??',
+        message: '???????皝????',
       };
     }
 
@@ -354,7 +362,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '?????湔??',
+      message: '???????皝????',
     };
   }
 
@@ -373,7 +381,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '???芷??',
+      message: '?????畸????',
     };
   }
 
@@ -492,5 +500,6 @@ export class ProductsService implements OnModuleInit {
     return `p_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   }
 }
+
 
 
