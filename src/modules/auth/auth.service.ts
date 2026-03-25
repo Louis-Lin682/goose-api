@@ -8,7 +8,7 @@
 import { UserRole } from '@prisma/client';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as argon2 from 'argon2';
-import type { CookieOptions } from 'express';
+import type { CookieOptions, Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -375,6 +375,11 @@ export class AuthService {
       ...this.getCookieBaseOptions(),
       maxAge: SESSION_TIMEOUT_IN_MS,
     };
+  }
+
+  renewSession(response: Response, userId: string): void {
+    const sessionToken = this.createSessionToken(userId, true);
+    response.cookie('goose_session', sessionToken, this.getCookieOptions(true));
   }
 
   getClearCookieOptions(): CookieOptions {

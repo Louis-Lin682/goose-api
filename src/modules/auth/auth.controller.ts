@@ -86,7 +86,10 @@ export class AuthController {
   }
 
   @Get('me')
-  async me(@Headers('cookie') cookieHeader?: string): Promise<{ user: AuthUser | null }> {
+  async me(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ user: AuthUser | null }> {
     const sessionToken = this.getCookieValue(cookieHeader, AUTH_COOKIE_NAME);
 
     if (!sessionToken) {
@@ -94,6 +97,7 @@ export class AuthController {
     }
 
     const user = await this.authService.getAuthenticatedUser(sessionToken);
+    this.authService.renewSession(response, user.id);
 
     return { user };
   }

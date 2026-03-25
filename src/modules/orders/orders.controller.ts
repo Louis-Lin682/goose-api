@@ -4,8 +4,10 @@ import {
   Get,
   Headers,
   Post,
+  Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthService, type AuthUser } from '../auth/auth.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import {
@@ -27,11 +29,16 @@ export class OrdersController {
   async createOrder(
     @Body() createOrderDto: CreateOrderDto,
     @Headers('cookie') cookieHeader?: string,
+    @Res({ passthrough: true }) response?: Response,
   ): Promise<CreateOrderResponse> {
     const user = await this.getAuthenticatedUser(cookieHeader);
 
     if (!user) {
       throw new UnauthorizedException('Please log in before checking out.');
+    }
+
+    if (response) {
+      this.authService.renewSession(response, user.id);
     }
 
     return this.ordersService.createOrder(createOrderDto, user.id);
@@ -40,8 +47,14 @@ export class OrdersController {
   @Get()
   async getOrderHistory(
     @Headers('cookie') cookieHeader?: string,
+    @Res({ passthrough: true }) response?: Response,
   ): Promise<OrderHistoryResponse> {
     const user = await this.getAuthenticatedUser(cookieHeader);
+
+    if (user && response) {
+      this.authService.renewSession(response, user.id);
+    }
+
     return this.ordersService.getOrderHistory(user?.id);
   }
 

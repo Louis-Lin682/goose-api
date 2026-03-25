@@ -4,9 +4,11 @@ import {
   Headers,
   Param,
   Patch,
+  Res,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { AuthService, type AuthUser } from '../auth/auth.service';
 import {
@@ -29,16 +31,24 @@ export class AdminNotificationsController {
   @Get()
   async getAdminNotifications(
     @Headers('cookie') cookieHeader?: string,
+    @Res({ passthrough: true }) response?: Response,
   ): Promise<AdminNotificationsResponse> {
     const user = await this.getAuthenticatedUser(cookieHeader);
+    if (response) {
+      this.authService.renewSession(response, user.id);
+    }
     return this.notificationsService.getAdminNotifications(user.id);
   }
 
   @Patch('read-all')
   async markAllAsRead(
     @Headers('cookie') cookieHeader?: string,
+    @Res({ passthrough: true }) response?: Response,
   ): Promise<MarkAllNotificationsReadResponse> {
     const user = await this.getAuthenticatedUser(cookieHeader);
+    if (response) {
+      this.authService.renewSession(response, user.id);
+    }
     return this.notificationsService.markAllAsRead(user.id);
   }
 
@@ -46,8 +56,12 @@ export class AdminNotificationsController {
   async markAsRead(
     @Param('notificationId') notificationId: string,
     @Headers('cookie') cookieHeader?: string,
+    @Res({ passthrough: true }) response?: Response,
   ): Promise<MarkNotificationReadResponse> {
     const user = await this.getAuthenticatedUser(cookieHeader);
+    if (response) {
+      this.authService.renewSession(response, user.id);
+    }
     return this.notificationsService.markAsRead(user.id, notificationId);
   }
 
