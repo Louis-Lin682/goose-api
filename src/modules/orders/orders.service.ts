@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -529,9 +529,6 @@ export class OrdersService {
   }
 
   private getShippingFee(subtotal: number, deliveryMethod: DeliveryMethod) {
-    if (deliveryMethod === DeliveryMethod.pickup) {
-      return 0;
-    }
 
     if (subtotal <= 1000) {
       return 200;
@@ -553,7 +550,7 @@ export class OrdersService {
     deliveryMethod: DeliveryMethod,
     paymentMethod: PaymentMethod,
   ) {
-    if (deliveryMethod === DeliveryMethod.pickup || paymentMethod !== 'cod') {
+    if (paymentMethod !== 'cod') {
       return 0;
     }
 
@@ -580,4 +577,5 @@ export class OrdersService {
     return `GO${yyyymmdd}${suffix}`;
   }
 }
+
 
