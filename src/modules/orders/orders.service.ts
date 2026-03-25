@@ -44,6 +44,9 @@ export type OrderHistoryEntry = {
   recipientPhone: string;
   recipientEmail: string;
   recipientAddress: string | null;
+  pickupStoreCode: string | null;
+  pickupStoreName: string | null;
+  pickupStoreAddress: string | null;
   note: string | null;
   subtotal: number;
   shippingFee: number;
@@ -139,10 +142,23 @@ export class OrdersService {
     const recipientPhone = createOrderDto.recipientPhone.trim();
     const recipientEmail = createOrderDto.recipientEmail.trim().toLowerCase();
     const recipientAddress = createOrderDto.recipientAddress?.trim() || null;
+    const pickupStoreCode = createOrderDto.pickupStoreCode?.trim() || null;
+    const pickupStoreName = createOrderDto.pickupStoreName?.trim() || null;
+    const pickupStoreAddress = createOrderDto.pickupStoreAddress?.trim() || null;
     const note = createOrderDto.note?.trim() || null;
 
     if (createOrderDto.deliveryMethod === DeliveryMethod.home && !recipientAddress) {
       throw new BadRequestException('Recipient address is required for home delivery.');
+    }
+
+    const isConvenienceStorePickup =
+      createOrderDto.deliveryMethod === DeliveryMethod.familymart ||
+      createOrderDto.deliveryMethod === DeliveryMethod.seven_eleven;
+
+    if (isConvenienceStorePickup) {
+      if (!pickupStoreCode || !pickupStoreName || !pickupStoreAddress) {
+        throw new BadRequestException('Pickup store code, name, and address are required for convenience-store pickup.');
+      }
     }
 
     const totalAmount = subtotal + expectedShippingFee + expectedCodFee;
@@ -157,6 +173,9 @@ export class OrdersService {
           recipientPhone,
           recipientEmail,
           recipientAddress,
+          pickupStoreCode,
+          pickupStoreName,
+          pickupStoreAddress,
           note,
           subtotal,
           shippingFee: expectedShippingFee,
@@ -374,6 +393,9 @@ export class OrdersService {
       recipientPhone: string;
       recipientEmail: string;
       recipientAddress: string | null;
+      pickupStoreCode: string | null;
+      pickupStoreName: string | null;
+      pickupStoreAddress: string | null;
       note: string | null;
       subtotal: number;
       shippingFee: number;
@@ -405,6 +427,9 @@ export class OrdersService {
       recipientPhone: order.recipientPhone,
       recipientEmail: order.recipientEmail,
       recipientAddress: order.recipientAddress,
+      pickupStoreCode: order.pickupStoreCode,
+      pickupStoreName: order.pickupStoreName,
+      pickupStoreAddress: order.pickupStoreAddress,
       note: order.note,
       subtotal: order.subtotal,
       shippingFee: order.shippingFee,
@@ -529,6 +554,9 @@ export class OrdersService {
   }
 
   private getShippingFee(subtotal: number, deliveryMethod: DeliveryMethod) {
+    if (deliveryMethod === DeliveryMethod.pickup) {
+      return 0;
+    }
 
     if (subtotal <= 1000) {
       return 200;
@@ -551,6 +579,10 @@ export class OrdersService {
     paymentMethod: PaymentMethod,
   ) {
     if (paymentMethod !== 'cod') {
+      return 0;
+    }
+
+    if (deliveryMethod === DeliveryMethod.pickup) {
       return 0;
     }
 
@@ -577,5 +609,9 @@ export class OrdersService {
     return `GO${yyyymmdd}${suffix}`;
   }
 }
+
+
+
+
 
 

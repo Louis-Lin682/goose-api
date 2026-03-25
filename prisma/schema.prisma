@@ -58,6 +58,9 @@ model Order {
   recipientPhone   String
   recipientEmail   String
   recipientAddress String?
+  pickupStoreCode  String?
+  pickupStoreName  String?
+  pickupStoreAddress String?
   note             String?
   subtotal         Int
   shippingFee      Int
@@ -126,6 +129,8 @@ model PasswordResetToken {
 enum DeliveryMethod {
   home
   pickup
+  familymart
+  seven_eleven
 }
 
 enum PaymentMethod {

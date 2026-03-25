@@ -1,4 +1,5 @@
-import {
+﻿import {
+  ArrayMinSize,
   IsArray,
   IsEmail,
   IsEnum,
@@ -9,7 +10,6 @@ import {
   Matches,
   Min,
   ValidateNested,
-  ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DeliveryMethod, PaymentMethod } from '@prisma/client';
@@ -52,15 +52,27 @@ export class CreateOrderDto {
   recipientName: string;
 
   @IsString()
-  @Matches(/^09\d{8}$/, { message: '請輸入正確的手機號碼格式。' })
+  @Matches(/^09\d{8}$/, { message: '請輸入正確的手機號碼。' })
   recipientPhone: string;
 
-  @IsEmail({}, { message: '請輸入正確的 Email 格式。' })
+  @IsEmail({}, { message: '請輸入正確的 Email。' })
   recipientEmail: string;
 
   @IsOptional()
   @IsString()
   recipientAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  pickupStoreCode?: string;
+
+  @IsOptional()
+  @IsString()
+  pickupStoreName?: string;
+
+  @IsOptional()
+  @IsString()
+  pickupStoreAddress?: string;
 
   @IsOptional()
   @IsString()
