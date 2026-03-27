@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -205,15 +205,17 @@ export class OrdersService {
       return createdOrder;
     });
 
-    try {
-      await this.notificationsService.createNewOrderNotification({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        recipientName: order.recipientName,
-        totalAmount: order.totalAmount,
-      });
-    } catch (error) {
-      console.error('Failed to create new order notification', error);
+    if (order.paymentMethod !== 'online') {
+      try {
+        await this.notificationsService.createNewOrderNotification({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          recipientName: order.recipientName,
+          totalAmount: order.totalAmount,
+        });
+      } catch (error) {
+        console.error('Failed to create new order notification', error);
+      }
     }
 
     return {

@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { OrderStatus, PaymentMethod, PaymentProvider, PaymentStatus } from '@prisma/client';
 import { createHash } from 'crypto';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 type EcpayCheckoutFieldMap = Record<string, string>;
@@ -32,6 +33,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {
     this.merchantId = this.configService.get<string>('ECPAY_MERCHANT_ID') ?? '2000132';
     this.hashKey = this.configService.get<string>('ECPAY_HASH_KEY') ?? '5294y06JbISpM5x9';
@@ -264,27 +266,53 @@ export class PaymentsService {
 
     const order = await this.prisma.order.findUnique({
       where: { merchantTradeNo },
-      select: { id: true, paymentStatus: true },
+      select: {
+        id: true,
+        orderNumber: true,
+        recipientName: true,
+        totalAmount: true,
+        paymentStatus: true,
+        notifications: {
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
 
     if (!order) {
       throw new NotFoundException('找不到對應的訂單。');
     }
 
-    if (order.paymentStatus === PaymentStatus.PAID) {
-      return;
+    const hasExistingNotification = order.notifications.length > 0;
+
+    if (order.paymentStatus !== PaymentStatus.PAID) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: PaymentStatus.PAID,
+          status: OrderStatus.PENDING,
+          tradeNo: payload.TradeNo || null,
+          paidAt: new Date(),
+          paymentProvider: PaymentProvider.ECPAY,
+        },
+      });
     }
 
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        paymentStatus: PaymentStatus.PAID,
-        status: OrderStatus.PENDING,
-        tradeNo: payload.TradeNo || null,
-        paidAt: new Date(),
-        paymentProvider: PaymentProvider.ECPAY,
-      },
-    });
+    if (!hasExistingNotification) {
+      try {
+        await this.notificationsService.createNewOrderNotification({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          recipientName: order.recipientName,
+          totalAmount: order.totalAmount,
+        });
+      } catch (error) {
+        this.logger.error(
+          'Failed to create paid-order notification for ' + order.orderNumber,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
   }
 
   private buildItemName(itemNames: string[]): string {
