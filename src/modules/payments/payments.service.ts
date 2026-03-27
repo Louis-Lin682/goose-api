@@ -44,14 +44,8 @@ export class PaymentsService {
     this.backendBaseUrl =
       this.configService.get<string>('BACKEND_BASE_URL') ?? `http://localhost:${port}`;
     this.frontendBaseUrl =
-      this.configService
-        .get<string>('FRONTEND_APP_URL')
-        ?.split(',')[0]
-        ?.trim() ||
-      this.configService
-        .get<string>('FRONTEND_ORIGIN')
-        ?.split(',')[0]
-        ?.trim() ||
+      this.configService.get<string>('FRONTEND_APP_URL')?.split(',')[0]?.trim() ||
+      this.configService.get<string>('FRONTEND_ORIGIN')?.split(',')[0]?.trim() ||
       'http://localhost:5173';
   }
 
@@ -150,7 +144,7 @@ export class PaymentsService {
     };
   }
 
-  buildEcpayResultRedirectUrl(payload: Record<string, string>): string {
+  async buildEcpayResultRedirectUrl(payload: Record<string, string>): Promise<string> {
     this.logger.log(
       `ECPay order result received: ${JSON.stringify({
         MerchantTradeNo: payload.MerchantTradeNo,
@@ -160,6 +154,10 @@ export class PaymentsService {
         PaymentType: payload.PaymentType,
       })}`,
     );
+
+    if (payload.RtnCode === '1') {
+      await this.markOrderPaidFromEcpayPayload(payload);
+    }
 
     const redirectUrl = new URL('/payment/ecpay/result', this.frontendBaseUrl);
 
@@ -250,6 +248,14 @@ export class PaymentsService {
       throw new BadRequestException('Invalid CheckMacValue');
     }
 
+    if (payload.RtnCode === '1') {
+      await this.markOrderPaidFromEcpayPayload(payload);
+    }
+
+    return '1|OK';
+  }
+
+  private async markOrderPaidFromEcpayPayload(payload: Record<string, string>): Promise<void> {
     const merchantTradeNo = payload.MerchantTradeNo;
 
     if (!merchantTradeNo) {
@@ -265,20 +271,20 @@ export class PaymentsService {
       throw new NotFoundException('找不到對應的訂單。');
     }
 
-    if (payload.RtnCode === '1') {
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          paymentStatus: PaymentStatus.PAID,
-          status: OrderStatus.PENDING,
-          tradeNo: payload.TradeNo || null,
-          paidAt: new Date(),
-          paymentProvider: PaymentProvider.ECPAY,
-        },
-      });
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      return;
     }
 
-    return '1|OK';
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        paymentStatus: PaymentStatus.PAID,
+        status: OrderStatus.PENDING,
+        tradeNo: payload.TradeNo || null,
+        paidAt: new Date(),
+        paymentProvider: PaymentProvider.ECPAY,
+      },
+    });
   }
 
   private buildItemName(itemNames: string[]): string {
@@ -332,4 +338,3 @@ export class PaymentsService {
       .replace(/%29/g, ')');
   }
 }
-

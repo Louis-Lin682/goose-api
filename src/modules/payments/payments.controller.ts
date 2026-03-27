@@ -87,7 +87,7 @@ export class PaymentsController {
       })}`,
     );
 
-    const redirectUrl = this.paymentsService.buildEcpayResultRedirectUrl(payload);
+    const redirectUrl = await this.paymentsService.buildEcpayResultRedirectUrl(payload);
     response.redirect(302, redirectUrl);
   }
 
@@ -103,7 +103,7 @@ export class PaymentsController {
       })}`,
     );
 
-    const redirectUrl = this.paymentsService.buildEcpayResultRedirectUrl(payload);
+    const redirectUrl = await this.paymentsService.buildEcpayResultRedirectUrl(payload);
     response.redirect(302, redirectUrl);
   }
 
