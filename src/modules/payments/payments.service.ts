@@ -107,9 +107,15 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       throw new InternalServerErrorException('��ɥI�ڳ]�w������C');
     }
 
-    const merchantTradeNo = order.merchantTradeNo ?? order.orderNumber;
+    const merchantTradeNo = order.merchantTradeNo
+      ? this.buildRetryMerchantTradeNo(order.orderNumber)
+      : order.orderNumber;
 
-    if (!order.merchantTradeNo || order.paymentProvider !== PaymentProvider.ECPAY) {
+    if (
+      order.merchantTradeNo !== merchantTradeNo ||
+      order.paymentProvider !== PaymentProvider.ECPAY ||
+      order.paymentStatus !== PaymentStatus.UNPAID
+    ) {
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
@@ -278,27 +284,85 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     return '1|OK';
   }
 
-  private async markOrderPaidFromEcpayPayload(payload: Record<string, string>): Promise<void> {
+  private async resolveOrderForEcpayPayload(payload: Record<string, string>) {
+    const orderId = payload.CustomField1;
+    const orderNumber = payload.CustomField2;
     const merchantTradeNo = payload.MerchantTradeNo;
 
-    if (!merchantTradeNo) {
-      throw new BadRequestException('Missing MerchantTradeNo');
+    if (orderId) {
+      const byId = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          orderNumber: true,
+          recipientName: true,
+          totalAmount: true,
+          paymentMethod: true,
+          paymentStatus: true,
+          status: true,
+          notifications: {
+            select: { id: true },
+            take: 1,
+          },
+        },
+      });
+
+      if (byId) {
+        return byId;
+      }
     }
 
-    const order = await this.prisma.order.findUnique({
-      where: { merchantTradeNo },
-      select: {
-        id: true,
-        orderNumber: true,
-        recipientName: true,
-        totalAmount: true,
-        paymentStatus: true,
-        notifications: {
-          select: { id: true },
-          take: 1,
+    if (orderNumber) {
+      const byOrderNumber = await this.prisma.order.findUnique({
+        where: { orderNumber },
+        select: {
+          id: true,
+          orderNumber: true,
+          recipientName: true,
+          totalAmount: true,
+          paymentMethod: true,
+          paymentStatus: true,
+          status: true,
+          notifications: {
+            select: { id: true },
+            take: 1,
+          },
         },
-      },
-    });
+      });
+
+      if (byOrderNumber) {
+        return byOrderNumber;
+      }
+    }
+
+    if (merchantTradeNo) {
+      const byMerchantTradeNo = await this.prisma.order.findUnique({
+        where: { merchantTradeNo },
+        select: {
+          id: true,
+          orderNumber: true,
+          recipientName: true,
+          totalAmount: true,
+          paymentMethod: true,
+          paymentStatus: true,
+          status: true,
+          notifications: {
+            select: { id: true },
+            take: 1,
+          },
+        },
+      });
+
+      if (byMerchantTradeNo) {
+        return byMerchantTradeNo;
+      }
+    }
+
+    return null;
+  }
+
+  private async markOrderPaidFromEcpayPayload(payload: Record<string, string>): Promise<void> {
+    const order = await this.resolveOrderForEcpayPayload(payload);
 
     if (!order) {
       throw new NotFoundException('Order not found.');
@@ -339,21 +403,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   private async markOrderPaymentFailedFromEcpayPayload(
     payload: Record<string, string>,
   ): Promise<void> {
-    const merchantTradeNo = payload.MerchantTradeNo;
-
-    if (!merchantTradeNo) {
-      throw new BadRequestException('Missing MerchantTradeNo');
-    }
-
-    const order = await this.prisma.order.findUnique({
-      where: { merchantTradeNo },
-      select: {
-        id: true,
-        paymentMethod: true,
-        paymentStatus: true,
-        status: true,
-      },
-    });
+    const order = await this.resolveOrderForEcpayPayload(payload);
 
     if (!order) {
       throw new NotFoundException('Order not found.');
@@ -367,15 +417,12 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (
-      order.paymentStatus !== PaymentStatus.FAILED ||
-      order.status !== OrderStatus.CANCELLED
-    ) {
+    if (order.paymentStatus !== PaymentStatus.FAILED || order.status !== OrderStatus.PENDING) {
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
           paymentStatus: PaymentStatus.FAILED,
-          status: OrderStatus.CANCELLED,
+          status: OrderStatus.PENDING,
           tradeNo: payload.TradeNo || null,
           paidAt: null,
           paymentProvider: PaymentProvider.ECPAY,
@@ -390,11 +437,13 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     const result = await this.prisma.order.updateMany({
       where: {
         paymentMethod: PaymentMethod.online,
-        paymentStatus: PaymentStatus.UNPAID,
+        paymentStatus: {
+          in: [PaymentStatus.UNPAID, PaymentStatus.FAILED],
+        },
         status: {
           not: OrderStatus.CANCELLED,
         },
-        createdAt: {
+        updatedAt: {
           lte: cutoff,
         },
       },
@@ -431,6 +480,11 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     const seconds = `${value.getSeconds()}`.padStart(2, '0');
 
     return `${year}/${month}/${date} ${hours}:${minutes}:${seconds}`;
+  }
+
+  private buildRetryMerchantTradeNo(orderNumber: string): string {
+    const retrySuffix = `${Date.now()}`.slice(-5);
+    return `${orderNumber}${retrySuffix}`.slice(0, 20);
   }
 
   private generateCheckMacValue(fields: Record<string, string>): string {
