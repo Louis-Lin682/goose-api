@@ -5,6 +5,8 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OrderStatus, PaymentMethod, PaymentProvider, PaymentStatus } from '@prisma/client';
@@ -21,14 +23,17 @@ export type EcpayCheckoutResponse = {
 };
 
 @Injectable()
-export class PaymentsService {
+export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PaymentsService.name);
+  private readonly unpaidOrderTimeoutInMs = 30 * 60 * 1000;
+  private readonly unpaidOrderSweepIntervalInMs = 5 * 60 * 1000;
   private readonly merchantId: string;
   private readonly hashKey: string;
   private readonly hashIv: string;
   private readonly checkoutAction: string;
   private readonly backendBaseUrl: string;
   private readonly frontendBaseUrl: string;
+  private unpaidOrderSweepTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -49,6 +54,20 @@ export class PaymentsService {
       this.configService.get<string>('FRONTEND_APP_URL')?.split(',')[0]?.trim() ||
       this.configService.get<string>('FRONTEND_ORIGIN')?.split(',')[0]?.trim() ||
       'http://localhost:5173';
+  }
+
+  onModuleInit(): void {
+    void this.cancelExpiredUnpaidOrders();
+    this.unpaidOrderSweepTimer = setInterval(() => {
+      void this.cancelExpiredUnpaidOrders();
+    }, this.unpaidOrderSweepIntervalInMs);
+  }
+
+  onModuleDestroy(): void {
+    if (this.unpaidOrderSweepTimer) {
+      clearInterval(this.unpaidOrderSweepTimer);
+      this.unpaidOrderSweepTimer = null;
+    }
   }
 
   async createEcpayCheckout(
@@ -362,6 +381,33 @@ export class PaymentsService {
           paymentProvider: PaymentProvider.ECPAY,
         },
       });
+    }
+  }
+
+  private async cancelExpiredUnpaidOrders(): Promise<void> {
+    const cutoff = new Date(Date.now() - this.unpaidOrderTimeoutInMs);
+
+    const result = await this.prisma.order.updateMany({
+      where: {
+        paymentMethod: PaymentMethod.online,
+        paymentStatus: PaymentStatus.UNPAID,
+        status: {
+          not: OrderStatus.CANCELLED,
+        },
+        createdAt: {
+          lte: cutoff,
+        },
+      },
+      data: {
+        paymentStatus: PaymentStatus.FAILED,
+        status: OrderStatus.CANCELLED,
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(
+        `Cancelled ${result.count} expired unpaid online order(s) after ${this.unpaidOrderTimeoutInMs / 60000} minutes.`,
+      );
     }
   }
 
