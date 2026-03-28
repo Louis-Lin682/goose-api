@@ -65,27 +65,27 @@ export class PaymentsService {
     });
 
     if (!order) {
-      throw new NotFoundException('§ä¤£¨ì«ü©wªº­q³æ¡C');
+      throw new NotFoundException('Order not found.');
     }
 
     if (order.userId && userId && order.userId !== userId) {
-      throw new ForbiddenException('§AµLªk´À¨ä¥L·|­ûªº­q³æ«Ø¥ß¥I´Ú¡C');
+      throw new ForbiddenException('ï¿½Aï¿½Lï¿½kï¿½ï¿½ï¿½ï¿½Lï¿½|ï¿½ï¿½ï¿½ï¿½ï¿½qï¿½ï¿½Ø¥ß¥Iï¿½Ú¡C');
     }
 
     if (!order.userId && userId === undefined) {
-      throw new ForbiddenException('½Ð¥ýµn¤J«á¦A«Ø¥ß¥I´Ú¡C');
+      throw new ForbiddenException('ï¿½Ð¥ï¿½ï¿½nï¿½Jï¿½ï¿½Aï¿½Ø¥ß¥Iï¿½Ú¡C');
     }
 
     if (order.paymentMethod !== PaymentMethod.online) {
-      throw new BadRequestException('¥u¦³½u¤W¥I´Úªº­q³æ¥i¥H¾É¦Vºñ¬É¡C');
+      throw new BadRequestException('ï¿½uï¿½ï¿½ï¿½uï¿½Wï¿½Iï¿½Úªï¿½ï¿½qï¿½ï¿½iï¿½Hï¿½É¦Vï¿½ï¿½É¡C');
     }
 
     if (order.paymentStatus === PaymentStatus.PAID) {
-      throw new BadRequestException('³oµ§­q³æ¤w§¹¦¨¥I´Ú¡C');
+      throw new BadRequestException('ï¿½oï¿½ï¿½ï¿½qï¿½ï¿½wï¿½ï¿½ï¿½ï¿½ï¿½Iï¿½Ú¡C');
     }
 
     if (!this.merchantId || !this.hashKey || !this.hashIv) {
-      throw new InternalServerErrorException('ºñ¬É¥I´Ú³]©w¤£§¹¾ã¡C');
+      throw new InternalServerErrorException('ï¿½ï¿½É¥Iï¿½Ú³]ï¿½wï¿½ï¿½ï¿½ï¿½ï¿½ï¿½C');
     }
 
     const merchantTradeNo = order.merchantTradeNo ?? order.orderNumber;
@@ -159,6 +159,8 @@ export class PaymentsService {
 
     if (payload.RtnCode === '1') {
       await this.markOrderPaidFromEcpayPayload(payload);
+    } else {
+      await this.markOrderPaymentFailedFromEcpayPayload(payload);
     }
 
     const redirectUrl = new URL('/payment/ecpay/result', this.frontendBaseUrl);
@@ -179,7 +181,7 @@ export class PaymentsService {
     status: OrderStatus;
   }> {
     if ((this.configService.get<string>('NODE_ENV') ?? 'development') === 'production') {
-      throw new ForbiddenException('¥¿¦¡Àô¹Ò¤£¤¹³\¨Ï¥Î¼ÒÀÀ¥I´Ú¡C');
+      throw new ForbiddenException('ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò¤ï¿½ï¿½ï¿½ï¿½\ï¿½Ï¥Î¼ï¿½ï¿½ï¿½ï¿½Iï¿½Ú¡C');
     }
 
     const order = await this.prisma.order.findUnique({
@@ -193,11 +195,11 @@ export class PaymentsService {
     });
 
     if (!order) {
-      throw new NotFoundException('§ä¤£¨ì«ü©wªº­q³æ¡C');
+      throw new NotFoundException('Order not found.');
     }
 
     if (order.paymentMethod !== PaymentMethod.online) {
-      throw new BadRequestException('¥u¦³½u¤W¥I´Úªº­q³æ¥i¥H¼ÒÀÀ¥I´Ú¦¨¥\¡C');
+      throw new BadRequestException('ï¿½uï¿½ï¿½ï¿½uï¿½Wï¿½Iï¿½Úªï¿½ï¿½qï¿½ï¿½iï¿½Hï¿½ï¿½ï¿½ï¿½ï¿½Iï¿½Ú¦ï¿½ï¿½\ï¿½C');
     }
 
     if (order.paymentStatus !== PaymentStatus.PAID) {
@@ -216,7 +218,7 @@ export class PaymentsService {
     this.logger.log(`ECPay simulated paid for order ${order.orderNumber}`);
 
     return {
-      message: '¼ÒÀÀ¥I´Ú¦¨¥\¡C',
+      message: 'ï¿½ï¿½ï¿½ï¿½ï¿½Iï¿½Ú¦ï¿½ï¿½\ï¿½C',
       orderId: order.id,
       orderNumber: order.orderNumber,
       status: OrderStatus.PENDING,
@@ -280,7 +282,7 @@ export class PaymentsService {
     });
 
     if (!order) {
-      throw new NotFoundException('§ä¤£¨ì¹ïÀ³ªº­q³æ¡C');
+      throw new NotFoundException('Order not found.');
     }
 
     const hasExistingNotification = order.notifications.length > 0;
@@ -312,6 +314,54 @@ export class PaymentsService {
           error instanceof Error ? error.stack : undefined,
         );
       }
+    }
+  }
+
+  private async markOrderPaymentFailedFromEcpayPayload(
+    payload: Record<string, string>,
+  ): Promise<void> {
+    const merchantTradeNo = payload.MerchantTradeNo;
+
+    if (!merchantTradeNo) {
+      throw new BadRequestException('Missing MerchantTradeNo');
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { merchantTradeNo },
+      select: {
+        id: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        status: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found.');
+    }
+
+    if (order.paymentMethod !== PaymentMethod.online) {
+      return;
+    }
+
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      return;
+    }
+
+    if (
+      order.paymentStatus !== PaymentStatus.FAILED ||
+      order.status !== OrderStatus.CANCELLED
+    ) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: PaymentStatus.FAILED,
+          status: OrderStatus.CANCELLED,
+          tradeNo: payload.TradeNo || null,
+          paidAt: null,
+          paymentProvider: PaymentProvider.ECPAY,
+        },
+      });
     }
   }
 
