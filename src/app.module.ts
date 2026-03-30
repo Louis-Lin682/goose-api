@@ -30,6 +30,3 @@ export class AppModule implements NestModule {
     consumer.apply(SessionRenewalMiddleware).forRoutes('*');
   }
 }
-
-
-

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Controller,
-  ForbiddenException,
   Get,
   Headers,
   Header,
@@ -16,7 +15,10 @@ import { OrderStatus } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { AuthService, type AuthUser } from '../auth/auth.service';
 import { CreateEcpayCheckoutDto } from './dto/create-ecpay-checkout.dto';
-import { PaymentsService, type EcpayCheckoutResponse } from './payments.service';
+import {
+  PaymentsService,
+  type EcpayCheckoutResponse,
+} from './payments.service';
 
 const AUTH_COOKIE_NAME = 'goose_session';
 
@@ -43,9 +45,12 @@ export class PaymentsController {
   }
 
   @Post('dev-simulate-paid')
-  async handleDevSimulatePaid(
-    @Body() payload: { orderId: string },
-  ): Promise<{ message: string; orderId: string; orderNumber: string; status: OrderStatus }> {
+  async handleDevSimulatePaid(@Body() payload: { orderId: string }): Promise<{
+    message: string;
+    orderId: string;
+    orderNumber: string;
+    status: OrderStatus;
+  }> {
     if (!payload.orderId) {
       throw new BadRequestException('Missing orderId');
     }
@@ -87,7 +92,8 @@ export class PaymentsController {
       })}`,
     );
 
-    const redirectUrl = await this.paymentsService.buildEcpayResultRedirectUrl(payload);
+    const redirectUrl =
+      await this.paymentsService.buildEcpayResultRedirectUrl(payload);
     response.redirect(302, redirectUrl);
   }
 
@@ -103,7 +109,8 @@ export class PaymentsController {
       })}`,
     );
 
-    const redirectUrl = await this.paymentsService.buildEcpayResultRedirectUrl(payload);
+    const redirectUrl =
+      await this.paymentsService.buildEcpayResultRedirectUrl(payload);
     response.redirect(302, redirectUrl);
   }
 
@@ -123,7 +130,10 @@ export class PaymentsController {
     }
   }
 
-  private getCookieValue(cookieHeader: string | undefined, key: string): string | null {
+  private getCookieValue(
+    cookieHeader: string | undefined,
+    key: string,
+  ): string | null {
     if (!cookieHeader) {
       return null;
     }
