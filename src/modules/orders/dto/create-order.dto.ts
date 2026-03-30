@@ -11,7 +11,7 @@
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { DeliveryMethod, PaymentMethod } from '@prisma/client';
 
 export class CreateOrderItemDto {
@@ -52,7 +52,10 @@ export class CreateOrderDto {
   recipientName: string;
 
   @IsString()
-  @Matches(/^09\d{8}$/, { message: '請輸入正確的手機號碼。' })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.replace(/[\s()-]/g, '').trim() : value,
+  )
+  @Matches(/^\d{8,10}$/, { message: '請輸入正確的聯絡電話。' })
   recipientPhone: string;
 
   @IsEmail({}, { message: '請輸入正確的 Email。' })

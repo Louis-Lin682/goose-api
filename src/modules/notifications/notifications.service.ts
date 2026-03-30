@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NotificationType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -38,6 +38,8 @@ type NewOrderNotificationInput = {
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async createNewOrderNotification(
@@ -68,56 +70,69 @@ export class NotificationsService {
   }
 
   async getAdminNotifications(userId: string): Promise<AdminNotificationsResponse> {
-    const [recipients, unreadCount] = await Promise.all([
-      this.prisma.notificationRecipient.findMany({
-        where: {
-          userId,
-        },
-        orderBy: {
-          notification: {
-            createdAt: 'desc',
+    try {
+      const [recipients, unreadCount] = await Promise.all([
+        this.prisma.notificationRecipient.findMany({
+          where: {
+            userId,
           },
-        },
-        include: {
-          notification: {
-            select: {
-              id: true,
-              type: true,
-              title: true,
-              message: true,
-              orderId: true,
-              order: {
-                select: {
-                  orderNumber: true,
-                },
-              },
-              createdAt: true,
+          orderBy: {
+            notification: {
+              createdAt: 'desc',
             },
           },
-        },
-      }),
-      this.prisma.notificationRecipient.count({
-        where: {
-          userId,
-          isRead: false,
-        },
-      }),
-    ]);
+          take: 50,
+          include: {
+            notification: {
+              select: {
+                id: true,
+                type: true,
+                title: true,
+                message: true,
+                orderId: true,
+                order: {
+                  select: {
+                    orderNumber: true,
+                  },
+                },
+                createdAt: true,
+              },
+            },
+          },
+        }),
+        this.prisma.notificationRecipient.count({
+          where: {
+            userId,
+            isRead: false,
+          },
+        }),
+      ]);
 
-    return {
-      notifications: recipients.map((recipient) => ({
-        id: recipient.notification.id,
-        type: recipient.notification.type,
-        title: recipient.notification.title,
-        message: recipient.notification.message,
-        orderId: recipient.notification.orderId,
-        orderNumber: recipient.notification.order?.orderNumber ?? null,
-        isRead: recipient.isRead,
-        readAt: recipient.readAt,
-        createdAt: recipient.notification.createdAt,
-      })),
-      unreadCount,
-    };
+      return {
+        notifications: recipients.map((recipient) => ({
+          id: recipient.notification.id,
+          type: recipient.notification.type,
+          title: recipient.notification.title,
+          message: recipient.notification.message,
+          orderId: recipient.notification.orderId,
+          orderNumber: recipient.notification.order?.orderNumber ?? null,
+          isRead: recipient.isRead,
+          readAt: recipient.readAt,
+          createdAt: recipient.notification.createdAt,
+        })),
+        unreadCount,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch admin notifications for user ${userId}.`,
+        error instanceof Error ? error.message : undefined,
+      );
+
+      return {
+        notifications: [],
+        unreadCount: 0,
+      };
+    }
   }
 
   async markAsRead(
@@ -143,6 +158,7 @@ export class NotificationsService {
     await this.prisma.notificationRecipient.updateMany({
       where: {
         notificationId,
+        userId,
         isRead: false,
       },
       data: {
@@ -184,6 +200,7 @@ export class NotificationsService {
 
     const result = await this.prisma.notificationRecipient.updateMany({
       where: {
+        userId,
         isRead: false,
       },
       data: {

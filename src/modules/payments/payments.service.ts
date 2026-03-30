@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -88,23 +88,23 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (order.userId && userId && order.userId !== userId) {
-      throw new ForbiddenException('�A�L�k����L�|�����q��إߥI�ڡC');
+      throw new ForbiddenException('這筆訂單不屬於目前登入的會員。');
     }
 
     if (!order.userId && userId === undefined) {
-      throw new ForbiddenException('�Х��n�J��A�إߥI�ڡC');
+      throw new ForbiddenException('請先登入會員，再建立付款。');
     }
 
     if (order.paymentMethod !== PaymentMethod.online) {
-      throw new BadRequestException('�u���u�W�I�ڪ��q��i�H�ɦV��ɡC');
+      throw new BadRequestException('只有線上付款訂單才能建立綠界付款。');
     }
 
     if (order.paymentStatus === PaymentStatus.PAID) {
-      throw new BadRequestException('�o���q��w�����I�ڡC');
+      throw new BadRequestException('這筆訂單已完成付款。');
     }
 
     if (!this.merchantId || !this.hashKey || !this.hashIv) {
-      throw new InternalServerErrorException('��ɥI�ڳ]�w������C');
+      throw new InternalServerErrorException('綠界金流尚未完成設定。');
     }
 
     const merchantTradeNo = order.merchantTradeNo
@@ -206,7 +206,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     status: OrderStatus;
   }> {
     if ((this.configService.get<string>('NODE_ENV') ?? 'development') === 'production') {
-      throw new ForbiddenException('������Ҥ����\�ϥμ����I�ڡC');
+      throw new ForbiddenException('正式環境不可使用模擬付款功能。');
     }
 
     const order = await this.prisma.order.findUnique({
@@ -224,7 +224,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (order.paymentMethod !== PaymentMethod.online) {
-      throw new BadRequestException('�u���u�W�I�ڪ��q��i�H�����I�ڦ��\�C');
+      throw new BadRequestException('只有線上付款訂單才能模擬付款成功。');
     }
 
     if (order.paymentStatus !== PaymentStatus.PAID) {
@@ -243,7 +243,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`ECPay simulated paid for order ${order.orderNumber}`);
 
     return {
-      message: '�����I�ڦ��\�C',
+      message: '已模擬付款成功。',
       orderId: order.id,
       orderNumber: order.orderNumber,
       status: OrderStatus.PENDING,
@@ -468,7 +468,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildItemName(itemNames: string[]): string {
-    const fallback = 'Goose order';
+    const fallback = '鵝作社訂單';
     const joined = itemNames.filter(Boolean).join('#').trim();
 
     if (!joined) {
