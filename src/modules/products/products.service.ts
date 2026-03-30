@@ -214,7 +214,7 @@ export class ProductsService implements OnModuleInit {
     await this.normalizeCategoryOrders();
 
     return {
-      message: '?????????',
+      message: '商品新增成功。',
       product,
     };
   }
@@ -302,7 +302,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '????皝????',
+      message: '商品更新成功。',
       product,
     };
   }
@@ -324,7 +324,7 @@ export class ProductsService implements OnModuleInit {
 
     if (currentCategory.categoryOrder === targetOrder) {
       return {
-        message: '???????皝????',
+        message: '分類排序未變更。',
       };
     }
 
@@ -373,7 +373,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '???????皝????',
+      message: '分類排序更新成功。',
     };
   }
 
@@ -392,7 +392,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '?????畸????',
+      message: '商品刪除成功。',
     };
   }
 
@@ -405,7 +405,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     if (!existingCategory) {
-      throw new NotFoundException('??????????');
+      throw new NotFoundException('分類不存在。');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -428,7 +428,7 @@ export class ProductsService implements OnModuleInit {
     });
 
     return {
-      message: '???????????',
+      message: '分類刪除成功。',
     };
   }
 
@@ -513,3 +513,5 @@ export class ProductsService implements OnModuleInit {
     return `p_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   }
 }
+
+
