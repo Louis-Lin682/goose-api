@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -26,7 +26,7 @@ export type EcpayCheckoutResponse = {
 export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PaymentsService.name);
   private readonly unpaidOrderTimeoutInMs = 30 * 60 * 1000;
-  private readonly unpaidOrderSweepIntervalInMs = 1 * 60 * 1000;
+  private readonly unpaidOrderSweepIntervalInMs = 5 * 60 * 1000;
   private readonly merchantId: string;
   private readonly hashKey: string;
   private readonly hashIv: string;
@@ -88,23 +88,23 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (order.userId && userId && order.userId !== userId) {
-      throw new ForbiddenException('嚙璀嚙盤嚙糊嚙踝蕭嚙踝蕭L嚙罵嚙踝蕭嚙踝蕭嚙緬嚙踝蕭堨艄I嚙誹。');
+      throw new ForbiddenException('�A�L�k����L�|�����q��إߥI�ڡC');
     }
 
     if (!order.userId && userId === undefined) {
-      throw new ForbiddenException('嚙請伐蕭嚙緯嚙皚嚙踝蕭A嚙諍立付嚙誹。');
+      throw new ForbiddenException('�Х��n�J��A�إߥI�ڡC');
     }
 
     if (order.paymentMethod !== PaymentMethod.online) {
-      throw new BadRequestException('嚙線嚙踝蕭嚙線嚙磕嚙瘢嚙誹迎蕭嚙緬嚙踝蕭i嚙瘡嚙褕向嚙踝蕭氶C');
+      throw new BadRequestException('�u���u�W�I�ڪ��q��i�H�ɦV��ɡC');
     }
 
     if (order.paymentStatus === PaymentStatus.PAID) {
-      throw new BadRequestException('嚙緻嚙踝蕭嚙緬嚙踝蕭w嚙踝蕭嚙踝蕭嚙瘢嚙誹。');
+      throw new BadRequestException('�o���q��w�����I�ڡC');
     }
 
     if (!this.merchantId || !this.hashKey || !this.hashIv) {
-      throw new InternalServerErrorException('嚙踝蕭犮I嚙誹設嚙緩嚙踝蕭嚙踝蕭嚙踝蕭C');
+      throw new InternalServerErrorException('��ɥI�ڳ]�w������C');
     }
 
     const merchantTradeNo = order.merchantTradeNo
@@ -206,7 +206,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     status: OrderStatus;
   }> {
     if ((this.configService.get<string>('NODE_ENV') ?? 'development') === 'production') {
-      throw new ForbiddenException('嚙踝蕭嚙踝蕭嚙踝蕭狺嚙踝蕭嚙踝蕭\嚙誕用潘蕭嚙踝蕭嚙瘢嚙誹。');
+      throw new ForbiddenException('������Ҥ����\�ϥμ����I�ڡC');
     }
 
     const order = await this.prisma.order.findUnique({
@@ -224,7 +224,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (order.paymentMethod !== PaymentMethod.online) {
-      throw new BadRequestException('嚙線嚙踝蕭嚙線嚙磕嚙瘢嚙誹迎蕭嚙緬嚙踝蕭i嚙瘡嚙踝蕭嚙踝蕭嚙瘢嚙誹佗蕭嚙穀嚙瘠');
+      throw new BadRequestException('�u���u�W�I�ڪ��q��i�H�����I�ڦ��\�C');
     }
 
     if (order.paymentStatus !== PaymentStatus.PAID) {
@@ -243,7 +243,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`ECPay simulated paid for order ${order.orderNumber}`);
 
     return {
-      message: '嚙踝蕭嚙踝蕭嚙瘢嚙誹佗蕭嚙穀嚙瘠',
+      message: '�����I�ڦ��\�C',
       orderId: order.id,
       orderNumber: order.orderNumber,
       status: OrderStatus.PENDING,
@@ -432,30 +432,37 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async cancelExpiredUnpaidOrders(): Promise<void> {
-    const cutoff = new Date(Date.now() - this.unpaidOrderTimeoutInMs);
+    try {
+      const cutoff = new Date(Date.now() - this.unpaidOrderTimeoutInMs);
 
-    const result = await this.prisma.order.updateMany({
-      where: {
-        paymentMethod: PaymentMethod.online,
-        paymentStatus: {
-          in: [PaymentStatus.UNPAID, PaymentStatus.FAILED],
+      const result = await this.prisma.order.updateMany({
+        where: {
+          paymentMethod: PaymentMethod.online,
+          paymentStatus: {
+            in: [PaymentStatus.UNPAID, PaymentStatus.FAILED],
+          },
+          status: {
+            not: OrderStatus.CANCELLED,
+          },
+          updatedAt: {
+            lte: cutoff,
+          },
         },
-        status: {
-          not: OrderStatus.CANCELLED,
+        data: {
+          paymentStatus: PaymentStatus.FAILED,
+          status: OrderStatus.CANCELLED,
         },
-        updatedAt: {
-          lte: cutoff,
-        },
-      },
-      data: {
-        paymentStatus: PaymentStatus.FAILED,
-        status: OrderStatus.CANCELLED,
-      },
-    });
+      });
 
-    if (result.count > 0) {
-      this.logger.log(
-        `Cancelled ${result.count} expired unpaid online order(s) after ${this.unpaidOrderTimeoutInMs / 60000} minutes.`,
+      if (result.count > 0) {
+        this.logger.log(
+          `Cancelled ${result.count} expired unpaid online order(s) after ${this.unpaidOrderTimeoutInMs / 60000} minutes.`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        'Failed to sweep expired unpaid online orders.',
+        error instanceof Error ? error.message : undefined,
       );
     }
   }
@@ -516,4 +523,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       .replace(/%29/g, ')');
   }
 }
+
+
+
 

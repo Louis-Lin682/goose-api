@@ -72,6 +72,8 @@ model Order {
   notifications    Notification[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+
+  @@index([paymentMethod, paymentStatus, status, updatedAt])
 }
 
 model OrderItem {
@@ -165,4 +167,6 @@ enum UserRole {
 enum NotificationType {
   NEW_ORDER
 }
+
+
 
