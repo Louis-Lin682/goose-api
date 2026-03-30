@@ -39,4 +39,3 @@ export class CreateProductDto {
   @Min(0, { message: 'Sort order must be greater than or equal to 0.' })
   sortOrder?: number;
 }
-

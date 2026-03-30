@@ -1,4 +1,9 @@
-﻿import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+﻿import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { INITIAL_PRODUCT_CATALOG } from './product-catalog';
@@ -168,8 +173,12 @@ export class ProductsService implements OnModuleInit {
       }
 
       const nextCategoryOrder = await this.getNextCategoryOrder(tx);
-      const requestedOrder = createProductDto.categoryOrder ?? nextCategoryOrder;
-      const categoryOrder = Math.min(Math.max(requestedOrder, 1), nextCategoryOrder);
+      const requestedOrder =
+        createProductDto.categoryOrder ?? nextCategoryOrder;
+      const categoryOrder = Math.min(
+        Math.max(requestedOrder, 1),
+        nextCategoryOrder,
+      );
 
       await tx.product.updateMany({
         where: {
@@ -222,8 +231,10 @@ export class ProductsService implements OnModuleInit {
       throw new NotFoundException('Product not found.');
     }
 
-    const nextCategory = updateProductDto.category?.trim() ?? existingProduct.category;
-    const nextSortOrder = updateProductDto.sortOrder ?? existingProduct.sortOrder;
+    const nextCategory =
+      updateProductDto.category?.trim() ?? existingProduct.category;
+    const nextSortOrder =
+      updateProductDto.sortOrder ?? existingProduct.sortOrder;
     const isSameCategory = nextCategory === existingProduct.category;
 
     if (!isSameCategory) {
@@ -448,7 +459,9 @@ export class ProductsService implements OnModuleInit {
       return;
     }
 
-    throw new BadRequestException(`Sort order ${sortOrder} is already used in category "${category}".`);
+    throw new BadRequestException(
+      `Sort order ${sortOrder} is already used in category "${category}".`,
+    );
   }
 
   private async normalizeCategoryOrders(): Promise<void> {
@@ -500,6 +513,3 @@ export class ProductsService implements OnModuleInit {
     return `p_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   }
 }
-
-
-
