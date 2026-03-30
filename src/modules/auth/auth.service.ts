@@ -335,19 +335,35 @@ export class AuthService {
   async getAuthenticatedUser(sessionToken: string): Promise<AuthUser> {
     const payload = this.verifySessionToken(sessionToken);
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        email: true,
-        address: true,
-        role: true,
-        lineUserId: true,
-        linePictureUrl: true,
-      },
-    });
+    const findUser = () =>
+      this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          address: true,
+          role: true,
+          lineUserId: true,
+          linePictureUrl: true,
+        },
+      });
+
+    let user;
+
+    try {
+      user = await findUser();
+    } catch (error) {
+      const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+
+      if (errorCode !== 'ETIMEDOUT') {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      user = await findUser();
+    }
 
     if (!user) {
       throw new UnauthorizedException('Session is invalid or has expired.');
@@ -820,8 +836,4 @@ export class AuthService {
     };
   }
 }
-
-
-
-
 

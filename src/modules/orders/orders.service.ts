@@ -246,18 +246,50 @@ export class OrdersService {
   }
 
   async getAdminOrders(): Promise<OrderHistoryResponse> {
-    const orders = await this.prisma.order.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        items: {
-          orderBy: { createdAt: 'asc' },
+    const findOrders = () =>
+      this.prisma.order.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+          items: {
+            orderBy: { createdAt: 'asc' },
+          },
         },
-      },
-    });
+        take: 200,
+      });
 
-    return {
-      orders: this.mapOrders(orders),
-    };
+    try {
+      const orders = await findOrders();
+
+      return {
+        orders: this.mapOrders(orders),
+      };
+    } catch (error) {
+      const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+
+      if (errorCode !== 'ETIMEDOUT') {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      try {
+        const orders = await findOrders();
+
+        return {
+          orders: this.mapOrders(orders),
+        };
+      } catch (retryError) {
+        const retryErrorCode = retryError && typeof retryError === 'object' && 'code' in retryError ? String(retryError.code) : '';
+
+        if (retryErrorCode === 'ETIMEDOUT') {
+          return {
+            orders: [],
+          };
+        }
+
+        throw retryError;
+      }
+    }
   }
 
   async getAdminProductStats(
@@ -611,6 +643,7 @@ export class OrdersService {
     return `GO${yyyymmdd}${suffix}`;
   }
 }
+
 
 
 

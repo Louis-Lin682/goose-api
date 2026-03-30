@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -523,7 +523,3 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       .replace(/%29/g, ')');
   }
 }
-
-
-
-
