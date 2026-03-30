@@ -1,5 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import {
@@ -40,7 +47,7 @@ export class AdminOrdersController {
   ): Promise<UpdateOrderStatusResponse> {
     return this.ordersService.updateOrderStatus(
       orderId,
-      updateOrderStatusDto.status as OrderStatus,
+      updateOrderStatusDto.status,
     );
   }
 }

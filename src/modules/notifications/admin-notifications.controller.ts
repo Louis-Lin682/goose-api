@@ -75,7 +75,10 @@ export class AdminNotificationsController {
     return this.authService.getAuthenticatedUser(sessionToken);
   }
 
-  private getCookieValue(cookieHeader: string | undefined, key: string): string | null {
+  private getCookieValue(
+    cookieHeader: string | undefined,
+    key: string,
+  ): string | null {
     if (!cookieHeader) {
       return null;
     }

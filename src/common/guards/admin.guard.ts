@@ -16,7 +16,10 @@ export class AdminGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
-    const sessionToken = this.getCookieValue(request.headers.cookie, AUTH_COOKIE_NAME);
+    const sessionToken = this.getCookieValue(
+      request.headers.cookie,
+      AUTH_COOKIE_NAME,
+    );
 
     if (!sessionToken) {
       throw new UnauthorizedException('請先登入管理員帳號。');
@@ -31,7 +34,10 @@ export class AdminGuard implements CanActivate {
     return true;
   }
 
-  private getCookieValue(cookieHeader: string | undefined, key: string): string | null {
+  private getCookieValue(
+    cookieHeader: string | undefined,
+    key: string,
+  ): string | null {
     if (!cookieHeader) {
       return null;
     }

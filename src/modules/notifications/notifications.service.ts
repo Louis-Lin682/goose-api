@@ -69,7 +69,9 @@ export class NotificationsService {
     });
   }
 
-  async getAdminNotifications(userId: string): Promise<AdminNotificationsResponse> {
+  async getAdminNotifications(
+    userId: string,
+  ): Promise<AdminNotificationsResponse> {
     try {
       const [recipients, unreadCount] = await Promise.all([
         this.prisma.notificationRecipient.findMany({
@@ -188,7 +190,9 @@ export class NotificationsService {
     });
   }
 
-  async markAllAsRead(userId: string): Promise<MarkAllNotificationsReadResponse> {
+  async markAllAsRead(
+    userId: string,
+  ): Promise<MarkAllNotificationsReadResponse> {
     const hasAnyRecipient = await this.prisma.notificationRecipient.findFirst({
       where: { userId },
       select: { notificationId: true },

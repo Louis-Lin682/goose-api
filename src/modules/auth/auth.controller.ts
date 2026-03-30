@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -50,7 +58,8 @@ export class AuthController {
     @Res() response: Response,
   ): void {
     const lineMode = mode === 'register' ? 'register' : 'login';
-    const { authorizationUrl } = this.authService.createLineAuthorizationUrl(lineMode);
+    const { authorizationUrl } =
+      this.authService.createLineAuthorizationUrl(lineMode);
     response.redirect(authorizationUrl);
   }
 
@@ -62,9 +71,16 @@ export class AuthController {
   ): Promise<void> {
     try {
       const result = await this.authService.handleLineCallback({ code, state });
-      const sessionToken = this.authService.createSessionToken(result.user.id, true);
+      const sessionToken = this.authService.createSessionToken(
+        result.user.id,
+        true,
+      );
 
-      response.cookie(AUTH_COOKIE_NAME, sessionToken, this.authService.getCookieOptions(true));
+      response.cookie(
+        AUTH_COOKIE_NAME,
+        sessionToken,
+        this.authService.getCookieOptions(true),
+      );
       response.redirect(result.redirectUrl);
     } catch (error) {
       response.redirect(this.authService.getLineFailureRedirectUrl(error));
@@ -104,14 +120,20 @@ export class AuthController {
 
   @Post('logout')
   logout(@Res({ passthrough: true }) response: Response): { message: string } {
-    response.clearCookie(AUTH_COOKIE_NAME, this.authService.getClearCookieOptions());
+    response.clearCookie(
+      AUTH_COOKIE_NAME,
+      this.authService.getClearCookieOptions(),
+    );
 
     return {
       message: 'Logout success',
     };
   }
 
-  private getCookieValue(cookieHeader: string | undefined, key: string): string | null {
+  private getCookieValue(
+    cookieHeader: string | undefined,
+    key: string,
+  ): string | null {
     if (!cookieHeader) {
       return null;
     }

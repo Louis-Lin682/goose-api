@@ -8,8 +8,15 @@ const AUTH_COOKIE_NAME = 'goose_session';
 export class SessionRenewalMiddleware implements NestMiddleware {
   constructor(private readonly authService: AuthService) {}
 
-  async use(request: Request, response: Response, next: NextFunction): Promise<void> {
-    const sessionToken = this.getCookieValue(request.headers.cookie, AUTH_COOKIE_NAME);
+  async use(
+    request: Request,
+    response: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    const sessionToken = this.getCookieValue(
+      request.headers.cookie,
+      AUTH_COOKIE_NAME,
+    );
 
     if (!sessionToken) {
       next();
@@ -26,7 +33,10 @@ export class SessionRenewalMiddleware implements NestMiddleware {
     next();
   }
 
-  private getCookieValue(cookieHeader: string | undefined, key: string): string | null {
+  private getCookieValue(
+    cookieHeader: string | undefined,
+    key: string,
+  ): string | null {
     if (!cookieHeader) {
       return null;
     }

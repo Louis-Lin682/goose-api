@@ -7,7 +7,6 @@ import {
   Patch,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
@@ -34,10 +33,7 @@ export class AdminUsersController {
     @Param('userId') userId: string,
     @Body() updateUserRoleDto: UpdateUserRoleDto,
   ): Promise<UpdateUserRoleResponse> {
-    return this.usersService.updateUserRole(
-      userId,
-      updateUserRoleDto.role as UserRole,
-    );
+    return this.usersService.updateUserRole(userId, updateUserRoleDto.role);
   }
 
   @Patch(':userId')
