@@ -1,7 +1,8 @@
-import { IsString, MinLength } from 'class-validator';
+ï»¿import { IsString, MinLength } from 'class-validator';
 
 export class CreateEcpayCheckoutDto {
-  @IsString({ message: '½Ğ´£¨Ñ­q³æ ID¡C' })
-  @MinLength(1, { message: '½Ğ´£¨Ñ­q³æ ID¡C' })
+  @IsString({ message: 'è«‹æä¾›è¨‚å–® IDã€‚' })
+  @MinLength(1, { message: 'è«‹æä¾›è¨‚å–® IDã€‚' })
   orderId!: string;
 }
+
