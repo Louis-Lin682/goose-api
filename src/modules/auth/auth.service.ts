@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -6,7 +6,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto';
 import * as argon2 from 'argon2';
 import type { CookieOptions, Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -156,7 +161,10 @@ export class AuthService {
       throw new UnauthorizedException('手機號碼、Email 或密碼錯誤');
     }
 
-    const isPasswordValid = await argon2.verify(user.passwordHash, loginDto.password);
+    const isPasswordValid = await argon2.verify(
+      user.passwordHash,
+      loginDto.password,
+    );
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('手機號碼、Email 或密碼錯誤');
@@ -205,15 +213,22 @@ export class AuthService {
     };
   }
 
-  async handleLineCallback(args: LineCallbackArgs): Promise<{ user: AuthUser; redirectUrl: string }> {
+  async handleLineCallback(
+    args: LineCallbackArgs,
+  ): Promise<{ user: AuthUser; redirectUrl: string }> {
     if (!args.code || !args.state) {
-      throw new BadRequestException('LINE login callback is missing required parameters.');
+      throw new BadRequestException(
+        'LINE login callback is missing required parameters.',
+      );
     }
 
     const storedState = this.verifySignedStateToken(args.state);
 
     const tokenResponse = await this.exchangeLineCodeForToken(args.code);
-    const verifiedProfile = await this.verifyLineIdToken(tokenResponse.id_token, storedState.nonce);
+    const verifiedProfile = await this.verifyLineIdToken(
+      tokenResponse.id_token,
+      storedState.nonce,
+    );
     const user = await this.findOrCreateLineUser(verifiedProfile);
 
     return {
@@ -260,11 +275,13 @@ export class AuthService {
       },
     });
 
-    const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+    const frontendAppUrl = (
+      process.env.FRONTEND_APP_URL ?? 'http://localhost:5173'
+    ).replace(/\/$/, '');
     const resetLink = `${frontendAppUrl}/forgot-password?token=${rawToken}`;
 
     const response: ForgotPasswordResponse = {
-      message: '若此 Email 已註冊，我們已寄送密碼重設連結。', 
+      message: '若此 Email 已註冊，我們已寄送密碼重設連結。',
     };
 
     if (this.shouldExposeResetToken()) {
@@ -286,7 +303,9 @@ export class AuthService {
 
     return response;
   }
-  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<ResetPasswordResponse> {
+  async resetPassword(
+    resetPasswordDto: ResetPasswordDto,
+  ): Promise<ResetPasswordResponse> {
     const tokenHash = this.hashResetToken(resetPasswordDto.token.trim());
 
     const resetToken = await this.prisma.passwordResetToken.findFirst({
@@ -328,14 +347,14 @@ export class AuthService {
     ]);
 
     return {
-      message: '密碼已重設成功。', 
+      message: '密碼已重設成功。',
     };
   }
 
   async getAuthenticatedUser(sessionToken: string): Promise<AuthUser> {
     const payload = this.verifySessionToken(sessionToken);
 
-    const findUser = () =>
+    const findUser = async (): Promise<AuthUserRecord | null> =>
       this.prisma.user.findUnique({
         where: { id: payload.sub },
         select: {
@@ -350,12 +369,12 @@ export class AuthService {
         },
       });
 
-    let user;
+    let user: Awaited<ReturnType<typeof findUser>> | null = null;
 
     try {
       user = await findUser();
     } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      const errorCode = this.getPrismaErrorCode(error);
 
       if (errorCode !== 'ETIMEDOUT') {
         throw error;
@@ -373,7 +392,8 @@ export class AuthService {
     return this.toAuthUser(syncedUser);
   }
 
-  createSessionToken(userId: string, _remember: boolean): string {
+  createSessionToken(userId: string, remember: boolean): string {
+    void remember;
     const expiresAt = Date.now() + SESSION_TIMEOUT_IN_MS;
     const payload = Buffer.from(
       JSON.stringify({
@@ -387,7 +407,8 @@ export class AuthService {
     return `${payload}.${signature}`;
   }
 
-  getCookieOptions(_remember: boolean): CookieOptions {
+  getCookieOptions(remember: boolean): CookieOptions {
+    void remember;
     return {
       ...this.getCookieBaseOptions(),
       maxAge: SESSION_TIMEOUT_IN_MS,
@@ -404,8 +425,11 @@ export class AuthService {
   }
 
   getLineFailureRedirectUrl(error: unknown): string {
-    const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
-    const message = error instanceof Error ? error.message : 'LINE login failed.';
+    const frontendAppUrl = (
+      process.env.FRONTEND_APP_URL ?? 'http://localhost:5173'
+    ).replace(/\/$/, '');
+    const message =
+      error instanceof Error ? error.message : 'LINE login failed.';
 
     return `${frontendAppUrl}/auth/line/complete?status=error&message=${encodeURIComponent(message)}`;
   }
@@ -476,7 +500,9 @@ export class AuthService {
   }
 
   private createSignedStateToken(payload: LineStatePayload): string {
-    const rawPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const rawPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString(
+      'base64url',
+    );
     const signature = this.signPayload(rawPayload);
 
     return `${rawPayload}.${signature}`;
@@ -504,7 +530,9 @@ export class AuthService {
       throw new UnauthorizedException('LINE login session is invalid.');
     }
 
-    const parsed = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8')) as LineStatePayload;
+    const parsed = JSON.parse(
+      Buffer.from(payloadPart, 'base64url').toString('utf8'),
+    ) as LineStatePayload;
 
     if (!parsed.nonce || !parsed.mode || parsed.exp < Date.now()) {
       throw new UnauthorizedException('LINE login session has expired.');
@@ -516,7 +544,9 @@ export class AuthService {
   private signPayload(payload: string): string {
     const secret =
       process.env.AUTH_SECRET ??
-      (process.env.NODE_ENV === 'production' ? undefined : 'dev-only-change-me');
+      (process.env.NODE_ENV === 'production'
+        ? undefined
+        : 'dev-only-change-me');
 
     if (!secret) {
       throw new InternalServerErrorException('AUTH_SECRET is missing.');
@@ -530,7 +560,9 @@ export class AuthService {
   }
 
   private hasEmailDeliveryConfig(): boolean {
-    return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+    return Boolean(
+      process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim(),
+    );
   }
 
   private async sendPasswordResetEmail(args: {
@@ -593,10 +625,15 @@ export class AuthService {
     }
   }
   private shouldExposeResetToken(): boolean {
-    return process.env.NODE_ENV !== 'production' || process.env.PASSWORD_RESET_DEBUG === 'true';
+    return (
+      process.env.NODE_ENV !== 'production' ||
+      process.env.PASSWORD_RESET_DEBUG === 'true'
+    );
   }
 
-  private getRequiredLineConfig(key: 'LINE_LOGIN_CHANNEL_ID' | 'LINE_LOGIN_CHANNEL_SECRET'): string {
+  private getRequiredLineConfig(
+    key: 'LINE_LOGIN_CHANNEL_ID' | 'LINE_LOGIN_CHANNEL_SECRET',
+  ): string {
     const value = process.env[key]?.trim();
 
     if (!value) {
@@ -623,18 +660,24 @@ export class AuthService {
       return `${frontendAppUrl.replace(/\/$/, '')}/api/auth/line/callback`;
     }
 
-    const backendBaseUrl = (process.env.BACKEND_BASE_URL ?? 'http://localhost:3001').trim();
+    const backendBaseUrl = (
+      process.env.BACKEND_BASE_URL ?? 'http://localhost:3001'
+    ).trim();
     return `${backendBaseUrl.replace(/\/$/, '')}/auth/line/callback`;
   }
 
   private getLineSuccessRedirectUrl(isAdmin: boolean): string {
-    const frontendAppUrl = (process.env.FRONTEND_APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+    const frontendAppUrl = (
+      process.env.FRONTEND_APP_URL ?? 'http://localhost:5173'
+    ).replace(/\/$/, '');
     const next = isAdmin ? '/admin/notifications' : '/';
 
     return `${frontendAppUrl}/auth/line/complete?next=${encodeURIComponent(next)}`;
   }
 
-  private async exchangeLineCodeForToken(code: string): Promise<LineTokenResponse> {
+  private async exchangeLineCodeForToken(
+    code: string,
+  ): Promise<LineTokenResponse> {
     const response = await fetch(LINE_TOKEN_URL, {
       method: 'POST',
       headers: {
@@ -650,7 +693,9 @@ export class AuthService {
     });
 
     if (!response.ok) {
-      throw new UnauthorizedException('Failed to exchange LINE authorization code.');
+      throw new UnauthorizedException(
+        'Failed to exchange LINE authorization code.',
+      );
     }
 
     const data = (await response.json()) as Partial<LineTokenResponse>;
@@ -665,7 +710,10 @@ export class AuthService {
     };
   }
 
-  private async verifyLineIdToken(idToken: string, nonce: string): Promise<LineVerifiedProfile> {
+  private async verifyLineIdToken(
+    idToken: string,
+    nonce: string,
+  ): Promise<LineVerifiedProfile> {
     const response = await fetch(LINE_VERIFY_ID_TOKEN_URL, {
       method: 'POST',
       headers: {
@@ -685,13 +733,17 @@ export class AuthService {
     const data = (await response.json()) as LineVerifiedProfile;
 
     if (!data.sub) {
-      throw new UnauthorizedException('LINE ID token is missing the user identifier.');
+      throw new UnauthorizedException(
+        'LINE ID token is missing the user identifier.',
+      );
     }
 
     return data;
   }
 
-  private async findOrCreateLineUser(profile: LineVerifiedProfile): Promise<AuthUserRecord> {
+  private async findOrCreateLineUser(
+    profile: LineVerifiedProfile,
+  ): Promise<AuthUserRecord> {
     const existingLineUser = await this.prisma.user.findFirst({
       where: {
         lineUserId: profile.sub,
@@ -753,7 +805,8 @@ export class AuthService {
     }
 
     const syntheticPhone = `line_${profile.sub.slice(-10)}`;
-    const syntheticEmail = normalizedEmail ?? `line_${profile.sub.toLowerCase()}@login.goose.local`;
+    const syntheticEmail =
+      normalizedEmail ?? `line_${profile.sub.toLowerCase()}@login.goose.local`;
     const passwordHash = await argon2.hash(randomBytes(24).toString('hex'));
 
     const createdUser = await this.prisma.user.create({
@@ -784,11 +837,16 @@ export class AuthService {
     return this.syncBootstrapAdminRole(createdUser);
   }
 
-  private resolveBootstrapRole(user: { email: string; phone: string }): UserRole {
+  private resolveBootstrapRole(user: {
+    email: string;
+    phone: string;
+  }): UserRole {
     return this.isBootstrapAdmin(user) ? UserRole.ADMIN : UserRole.CUSTOMER;
   }
 
-  private async syncBootstrapAdminRole(user: AuthUserRecord): Promise<AuthUserRecord> {
+  private async syncBootstrapAdminRole(
+    user: AuthUserRecord,
+  ): Promise<AuthUserRecord> {
     if (user.role === UserRole.ADMIN || !this.isBootstrapAdmin(user)) {
       return user;
     }
@@ -821,7 +879,19 @@ export class AuthService {
       .map((value) => value.trim())
       .filter(Boolean);
 
-    return allowedPhones.includes(normalizedPhone) || allowedEmails.includes(normalizedEmail);
+    return (
+      allowedPhones.includes(normalizedPhone) ||
+      allowedEmails.includes(normalizedEmail)
+    );
+  }
+
+  private getPrismaErrorCode(error: unknown): string {
+    if (!error || typeof error !== 'object' || !('code' in error)) {
+      return '';
+    }
+
+    const code = (error as { code?: unknown }).code;
+    return typeof code === 'string' ? code : '';
   }
 
   private toAuthUser(user: AuthUserRecord): AuthUser {
@@ -836,4 +906,3 @@ export class AuthService {
     };
   }
 }
-

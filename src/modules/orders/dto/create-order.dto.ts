@@ -52,10 +52,10 @@ export class CreateOrderDto {
   recipientName: string;
 
   @IsString()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.replace(/[\s()-]/g, '').trim() : value,
+  @Transform(({ value }: { value: unknown }): string =>
+    typeof value === 'string' ? value.replace(/[\\s()-]/g, '').trim() : '',
   )
-  @Matches(/^\d{8,10}$/, { message: '請輸入正確的聯絡電話。' })
+  @Matches(/^\\d{8,10}$/, { message: '請輸入正確的聯絡電話。' })
   recipientPhone: string;
 
   @IsEmail({}, { message: '請輸入正確的 Email。' })

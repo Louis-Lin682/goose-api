@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -67,7 +67,11 @@ export type UpdateOrderStatusResponse = {
   status: string;
 };
 
-export type AdminProductStatsPreset = 'today' | 'this-month' | 'last-month' | 'custom';
+export type AdminProductStatsPreset =
+  | 'today'
+  | 'this-month'
+  | 'last-month'
+  | 'custom';
 
 export type AdminProductStatsFilters = {
   preset?: AdminProductStatsPreset;
@@ -121,8 +125,14 @@ export class OrdersService {
       lineTotal: item.finalPrice * item.quantity,
     }));
 
-    const subtotal = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
-    const expectedShippingFee = this.getShippingFee(subtotal, createOrderDto.deliveryMethod);
+    const subtotal = normalizedItems.reduce(
+      (sum, item) => sum + item.lineTotal,
+      0,
+    );
+    const expectedShippingFee = this.getShippingFee(
+      subtotal,
+      createOrderDto.deliveryMethod,
+    );
     const expectedCodFee = this.getCodFee(
       subtotal,
       createOrderDto.deliveryMethod,
@@ -130,11 +140,15 @@ export class OrdersService {
     );
 
     if (createOrderDto.shippingFee !== expectedShippingFee) {
-      throw new BadRequestException('Shipping fee does not match the expected amount.');
+      throw new BadRequestException(
+        'Shipping fee does not match the expected amount.',
+      );
     }
 
     if (createOrderDto.codFee !== expectedCodFee) {
-      throw new BadRequestException('COD fee does not match the expected amount.');
+      throw new BadRequestException(
+        'COD fee does not match the expected amount.',
+      );
     }
 
     const orderNumber = this.createOrderNumber();
@@ -144,11 +158,17 @@ export class OrdersService {
     const recipientAddress = createOrderDto.recipientAddress?.trim() || null;
     const pickupStoreCode = createOrderDto.pickupStoreCode?.trim() || null;
     const pickupStoreName = createOrderDto.pickupStoreName?.trim() || null;
-    const pickupStoreAddress = createOrderDto.pickupStoreAddress?.trim() || null;
+    const pickupStoreAddress =
+      createOrderDto.pickupStoreAddress?.trim() || null;
     const note = createOrderDto.note?.trim() || null;
 
-    if (createOrderDto.deliveryMethod === DeliveryMethod.home && !recipientAddress) {
-      throw new BadRequestException('Recipient address is required for home delivery.');
+    if (
+      createOrderDto.deliveryMethod === DeliveryMethod.home &&
+      !recipientAddress
+    ) {
+      throw new BadRequestException(
+        'Recipient address is required for home delivery.',
+      );
     }
 
     const isConvenienceStorePickup =
@@ -157,7 +177,9 @@ export class OrdersService {
 
     if (isConvenienceStorePickup) {
       if (!pickupStoreCode || !pickupStoreName || !pickupStoreAddress) {
-        throw new BadRequestException('Pickup store code, name, and address are required for convenience-store pickup.');
+        throw new BadRequestException(
+          'Pickup store code, name, and address are required for convenience-store pickup.',
+        );
       }
     }
 
@@ -227,7 +249,9 @@ export class OrdersService {
 
   async getOrderHistory(userId?: string): Promise<OrderHistoryResponse> {
     if (!userId) {
-      throw new UnauthorizedException('Please log in first to view order history.');
+      throw new UnauthorizedException(
+        'Please log in first to view order history.',
+      );
     }
 
     const orders = await this.prisma.order.findMany({
@@ -264,7 +288,7 @@ export class OrdersService {
         orders: this.mapOrders(orders),
       };
     } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      const errorCode = this.getPrismaErrorCode(error);
 
       if (errorCode !== 'ETIMEDOUT') {
         throw error;
@@ -279,7 +303,7 @@ export class OrdersService {
           orders: this.mapOrders(orders),
         };
       } catch (retryError) {
-        const retryErrorCode = retryError && typeof retryError === 'object' && 'code' in retryError ? String(retryError.code) : '';
+        const retryErrorCode = this.getPrismaErrorCode(retryError);
 
         if (retryErrorCode === 'ETIMEDOUT') {
           return {
@@ -362,7 +386,10 @@ export class OrdersService {
       })
       .slice(0, 10);
 
-    const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + order.totalAmount,
+      0,
+    );
     const totalItemsSold = orders.reduce(
       (sum, order) =>
         sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0),
@@ -412,6 +439,15 @@ export class OrdersService {
       orderId: order.id,
       status: order.status,
     };
+  }
+
+  private getPrismaErrorCode(error: unknown): string | null {
+    if (!error || typeof error !== 'object' || !('code' in error)) {
+      return null;
+    }
+
+    const maybeCode = (error as { code?: unknown }).code;
+    return typeof maybeCode === 'string' ? maybeCode : String(maybeCode);
   }
 
   private mapOrders(
@@ -492,7 +528,9 @@ export class OrdersService {
       const end = this.parseDateBoundary(filters.endDate, 'end');
 
       if (start > end) {
-        throw new BadRequestException('Start date cannot be later than end date.');
+        throw new BadRequestException(
+          'Start date cannot be later than end date.',
+        );
       }
 
       return {
@@ -504,8 +542,24 @@ export class OrdersService {
     }
 
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999,
+    );
 
     if (normalizedPreset === 'today') {
       return {
@@ -525,8 +579,24 @@ export class OrdersService {
       };
     }
 
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const lastMonthStart = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+    const lastMonthEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      0,
+      23,
+      59,
+      59,
+      999,
+    );
 
     return {
       preset: normalizedPreset,
@@ -537,7 +607,7 @@ export class OrdersService {
   }
 
   private normalizePreset(
-    preset?: AdminProductStatsPreset | string,
+    preset?: AdminProductStatsPreset,
   ): AdminProductStatsPreset {
     switch (preset) {
       case 'this-month':
@@ -643,10 +713,3 @@ export class OrdersService {
     return `GO${yyyymmdd}${suffix}`;
   }
 }
-
-
-
-
-
-
-

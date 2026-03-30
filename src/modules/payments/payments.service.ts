@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -9,7 +9,12 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OrderStatus, PaymentMethod, PaymentProvider, PaymentStatus } from '@prisma/client';
+import {
+  OrderStatus,
+  PaymentMethod,
+  PaymentProvider,
+  PaymentStatus,
+} from '@prisma/client';
 import { createHash } from 'crypto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -40,19 +45,29 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
   ) {
-    this.merchantId = this.configService.get<string>('ECPAY_MERCHANT_ID') ?? '2000132';
-    this.hashKey = this.configService.get<string>('ECPAY_HASH_KEY') ?? '5294y06JbISpM5x9';
-    this.hashIv = this.configService.get<string>('ECPAY_HASH_IV') ?? 'v77hoKGq4kWxNNIS';
+    this.merchantId =
+      this.configService.get<string>('ECPAY_MERCHANT_ID') ?? '2000132';
+    this.hashKey =
+      this.configService.get<string>('ECPAY_HASH_KEY') ?? '5294y06JbISpM5x9';
+    this.hashIv =
+      this.configService.get<string>('ECPAY_HASH_IV') ?? 'v77hoKGq4kWxNNIS';
     this.checkoutAction =
       this.configService.get<string>('ECPAY_CHECKOUT_ACTION') ??
       'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5';
 
     const port = this.configService.get<string>('PORT') ?? '3001';
     this.backendBaseUrl =
-      this.configService.get<string>('BACKEND_BASE_URL') ?? `http://localhost:${port}`;
+      this.configService.get<string>('BACKEND_BASE_URL') ??
+      `http://localhost:${port}`;
     this.frontendBaseUrl =
-      this.configService.get<string>('FRONTEND_APP_URL')?.split(',')[0]?.trim() ||
-      this.configService.get<string>('FRONTEND_ORIGIN')?.split(',')[0]?.trim() ||
+      this.configService
+        .get<string>('FRONTEND_APP_URL')
+        ?.split(',')[0]
+        ?.trim() ||
+      this.configService
+        .get<string>('FRONTEND_ORIGIN')
+        ?.split(',')[0]
+        ?.trim() ||
       'http://localhost:5173';
   }
 
@@ -171,7 +186,9 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async buildEcpayResultRedirectUrl(payload: Record<string, string>): Promise<string> {
+  async buildEcpayResultRedirectUrl(
+    payload: Record<string, string>,
+  ): Promise<string> {
     this.logger.log(
       `ECPay order result received: ${JSON.stringify({
         MerchantTradeNo: payload.MerchantTradeNo,
@@ -205,7 +222,10 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     orderNumber: string;
     status: OrderStatus;
   }> {
-    if ((this.configService.get<string>('NODE_ENV') ?? 'development') === 'production') {
+    if (
+      (this.configService.get<string>('NODE_ENV') ?? 'development') ===
+      'production'
+    ) {
       throw new ForbiddenException('正式環境不可使用模擬付款功能。');
     }
 
@@ -250,7 +270,9 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async handleEcpayNotification(payload: Record<string, string>): Promise<string> {
+  async handleEcpayNotification(
+    payload: Record<string, string>,
+  ): Promise<string> {
     this.logger.log(
       `ECPay notify received: ${JSON.stringify({
         MerchantTradeNo: payload.MerchantTradeNo,
@@ -269,7 +291,9 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Missing CheckMacValue');
     }
 
-    const { CheckMacValue: _omitted, ...restPayload } = payload;
+    const restPayload = Object.fromEntries(
+      Object.entries(payload).filter(([key]) => key !== 'CheckMacValue'),
+    ) as Record<string, string>;
     const expectedCheckMacValue = this.generateCheckMacValue(restPayload);
 
     if (expectedCheckMacValue !== receivedCheckMacValue) {
@@ -361,7 +385,9 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
-  private async markOrderPaidFromEcpayPayload(payload: Record<string, string>): Promise<void> {
+  private async markOrderPaidFromEcpayPayload(
+    payload: Record<string, string>,
+  ): Promise<void> {
     const order = await this.resolveOrderForEcpayPayload(payload);
 
     if (!order) {
@@ -417,7 +443,10 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (order.paymentStatus !== PaymentStatus.FAILED || order.status !== OrderStatus.PENDING) {
+    if (
+      order.paymentStatus !== PaymentStatus.FAILED ||
+      order.status !== OrderStatus.PENDING
+    ) {
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
